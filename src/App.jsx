@@ -61,27 +61,13 @@ const MagneticButton = ({ children, className, onClick, variant = 'primary' }) =
 
 // --- Navbar Component ---
 const Navbar = ({ onOpenScanner }) => {
-  const navRef = useRef(null);
-
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      ScrollTrigger.create({
-        start: 'top -100',
-        end: 99999,
-        toggleClass: { className: 'scrolled', targets: navRef.current },
-      });
-    });
-    return () => ctx.revert();
-  }, []);
-
   return (
-    <nav ref={navRef} className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-5xl rounded-[2rem] transition-all duration-500 bg-transparent text-primary
-      [&.scrolled]:bg-background/60 [&.scrolled]:backdrop-blur-xl [&.scrolled]:text-dark [&.scrolled]:border [&.scrolled]:border-dark/10">
+    <nav className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-5xl rounded-[2rem] bg-transparent text-primary">
       <div className="flex items-center justify-between px-6 py-4">
         <div className="font-heading font-bold text-xl tracking-tight">VibeGuard</div>
         <div className="hidden md:flex gap-8 text-sm font-bold tracking-widest uppercase opacity-80">
-          <a href="#features" className="hover:-translate-y-[1px] transition-transform">Features</a>
-          <a href="#protocol" className="hover:-translate-y-[1px] transition-transform">Protocol</a>
+          <a href="#features" className="hover:text-accent transition-colors">Features</a>
+          <a href="#protocol" className="hover:text-accent transition-colors">Protocol</a>
         </div>
         <MagneticButton variant="primary" className="py-2 px-6 text-xs" onClick={onOpenScanner}>Run a free scan</MagneticButton>
       </div>
