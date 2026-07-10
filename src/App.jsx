@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import { Shield, ArrowRight } from 'lucide-react';
+import { Shield, ArrowRight, Zap, Lock, Terminal } from 'lucide-react';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -588,8 +588,6 @@ const ScannerModal = ({ isOpen, onClose }) => {
   const [isScanning, setIsScanning] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
-  const [email, setEmail] = useState('');
-  const [isUnlocked, setIsUnlocked] = useState(false);
   const fileInputRef = useRef(null);
 
   const pollForResults = (scanId) => {
@@ -620,7 +618,6 @@ const ScannerModal = ({ isOpen, onClose }) => {
     setIsScanning(true);
     setError(null);
     setResults(null);
-    setIsUnlocked(false);
 
     try {
       const formData = new FormData();
@@ -645,7 +642,6 @@ const ScannerModal = ({ isOpen, onClose }) => {
     setIsScanning(true);
     setError(null);
     setResults(null);
-    setIsUnlocked(false);
     
     try {
       const response = await fetch('/api/scan', {
@@ -698,55 +694,64 @@ const ScannerModal = ({ isOpen, onClose }) => {
               </div>
             </div>
 
-            {!isUnlocked && results.findingsCount > 0 ? (
-              <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-dark/10 text-center">
-                <Shield size={48} className="mx-auto text-accent mb-4" />
-                <h4 className="font-heading font-bold text-2xl mb-2">Unlock Detailed Fix Guide</h4>
-                <p className="text-dark/70 mb-6">We found {results.findingsCount} critical vulnerabilities. Enter your email to see exactly where they are and how to fix them.</p>
-                <div className="flex flex-col md:flex-row gap-4 justify-center max-w-md mx-auto">
-                  <input 
-                    type="email" 
-                    placeholder="builder@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="flex-1 bg-background border border-dark/20 rounded-[2rem] px-6 py-4 font-data text-sm focus:outline-none focus:border-accent"
-                  />
-                  <button 
-                    onClick={() => { if(email) setIsUnlocked(true); }}
-                    className="bg-accent text-white px-8 py-4 rounded-[2rem] font-heading font-bold uppercase tracking-wide hover:scale-[1.03] transition-transform"
-                  >
-                    Unlock
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                {results.findings && results.findings.length > 0 ? (
-                  results.findings.map((finding, idx) => (
-                    <div key={idx} className="bg-white p-6 rounded-[2rem] shadow-sm border border-dark/5">
-                      <div className="flex justify-between items-start mb-4">
-                        <h4 className="font-heading font-bold text-lg">{finding.title}</h4>
-                        <span className="font-data text-xs px-3 py-1 bg-accent/10 text-accent rounded-full uppercase">
-                          {finding.category}
-                        </span>
+            <div className="relative space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+              {results.findings && results.findings.length > 0 ? (
+                <>
+                  <div className="space-y-4 mb-32">
+                    {results.findings.map((finding, idx) => (
+                      <div key={idx} className="bg-white p-6 rounded-[2rem] shadow-sm border border-dark/5 relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-4">
+                          <h4 className="font-heading font-bold text-lg text-accent flex items-center gap-2">
+                            <Shield size={16} /> {finding.title}
+                          </h4>
+                          <span className="font-data text-xs px-3 py-1 bg-accent/10 text-accent rounded-full uppercase">
+                            {finding.category}
+                          </span>
+                        </div>
+                        <div className="font-data text-xs text-dark/50 mb-4 bg-dark/5 px-3 py-2 rounded-xl inline-block">
+                          {finding.file}
+                        </div>
+                        
+                        <div className="relative">
+                          <p className="text-dark/80 blur-sm select-none pointer-events-none">{finding.message || "This vulnerability allows remote code execution or data exfiltration. Remediation involves rewriting the affected logic and ensuring proper input sanitization."}</p>
+                          <div className="absolute inset-0 flex items-center justify-center bg-white/40">
+                            <div className="bg-dark text-primary font-data text-[10px] uppercase px-3 py-1 rounded-full flex items-center gap-2">
+                              <Lock size={12} className="text-accent" /> Remediation Locked
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="font-data text-xs text-dark/50 mb-3 bg-dark/5 px-3 py-2 rounded-xl inline-block">
-                        {finding.file}
-                      </div>
-                      <p className="text-dark/80">{finding.message}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-center py-12">
-                    <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 text-green-600 mb-4">
-                      <Shield size={32} />
-                    </div>
-                    <h4 className="font-heading font-bold text-xl mb-2">No Vulnerabilities Found</h4>
-                    <p className="text-dark/70">Your codebase looks clean and secure.</p>
+                    ))}
                   </div>
-                )}
-              </div>
-            )}
+                  
+                  <div className="sticky bottom-0 left-0 right-0 bg-gradient-to-t from-background via-background to-transparent pt-20 pb-4 px-2">
+                    <div className="bg-dark text-primary p-6 rounded-[2rem] shadow-[0_0_40px_rgba(230,59,46,0.2)] border-2 border-accent relative text-center">
+                      <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-accent text-primary font-heading font-bold uppercase tracking-widest text-[10px] px-4 py-2 rounded-full whitespace-nowrap">
+                        Critical Action Required
+                      </div>
+                      <h4 className="font-heading font-bold text-2xl mb-2 text-white mt-2">Your codebase is exposed.</h4>
+                      <p className="font-data text-xs text-primary/70 mb-6 leading-relaxed max-w-lg mx-auto">
+                        Don't just find vulnerabilities—block them. Upgrade to VibeGuard Pro to unlock 1-click remediations and deploy the <strong className="text-white">AgentGuard Sandbox</strong> to protect against rogue AI commands.
+                      </p>
+                      <button 
+                        onClick={() => { onClose(); setTimeout(() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' }), 100); }}
+                        className="w-full bg-accent text-white px-8 py-4 rounded-xl font-heading font-bold uppercase tracking-wide hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(230,59,46,0.4)]"
+                      >
+                        Upgrade to Pro - $49/mo
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 text-green-600 mb-4">
+                    <Shield size={32} />
+                  </div>
+                  <h4 className="font-heading font-bold text-xl mb-2">No Vulnerabilities Found</h4>
+                  <p className="text-dark/70">Your codebase looks clean and secure.</p>
+                </div>
+              )}
+            </div>
             <div className="mt-8">
               <MagneticButton variant="outline" className="w-full" onClick={resetScanner}>Scan Another Repo</MagneticButton>
             </div>
