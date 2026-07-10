@@ -1,0 +1,6 @@
+{
+  "name": "VibeScan",
+  "description": "An instant AI security scanner for vibe-coded projects. Paste a GitHub URL to get an instant security scorecard with no signup required.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
