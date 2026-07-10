@@ -1,0 +1,13 @@
+name: 'VibeAudit AI Security Scanner'
+description: 'Automatically scan your repository for OWASP Top 10 LLM vulnerabilities (Prompt Injection, Data Poisoning)'
+inputs:
+  fail-on:
+    description: 'The minimum grade that will cause the action to fail (A, B, C, D, F)'
+    required: false
+    default: 'D'
+runs:
+  using: 'node20'
+  main: 'action/dist/index.js'
+branding:
+  icon: 'shield'
+  color: 'red'
