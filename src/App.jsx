@@ -117,15 +117,15 @@ const Hero = ({ onOpenScanner }) => {
       
       <div className="relative z-10 w-full p-8 md:p-16 max-w-7xl mx-auto mb-10 md:mb-20">
         <h1 className="flex flex-col text-primary leading-[0.9]">
-          <span className="hero-element font-heading font-bold text-5xl md:text-7xl uppercase tracking-tighter">Protect the</span>
-          <span className="hero-element font-drama italic text-8xl md:text-[12rem] text-accent mt-[-2rem] md:mt-[-4rem]">Builder.</span>
+          <span className="hero-element font-heading font-bold text-5xl md:text-7xl uppercase tracking-tighter">Secure the</span>
+          <span className="hero-element font-drama italic text-8xl md:text-[12rem] text-accent mt-[-2rem] md:mt-[-4rem]">AI.</span>
         </h1>
         <div className="hero-element mt-12 max-w-xl">
           <p className="font-data text-primary/80 text-sm md:text-base leading-relaxed mb-8">
-            VIBEGUARD — SELLING PEACE OF MIND TO A GENERATION OF BUILDERS WHO HAVE THE POWER TO CREATE BUT NOT THE KNOWLEDGE TO PROTECT.
+            The first security suite built exclusively for AI-generated codebases and autonomous agents. Detect hallucinated dependencies, block rogue LLM commands at runtime, and prove your security to investors.
           </p>
           <MagneticButton variant="primary" className="hero-element" onClick={onOpenScanner}>
-            Run a free scan <ArrowRight size={18} />
+            Run Free AI Security Audit <ArrowRight size={18} />
           </MagneticButton>
         </div>
       </div>
@@ -136,9 +136,9 @@ const Hero = ({ onOpenScanner }) => {
 // --- Features: Diagnostic Shuffler ---
 const DiagnosticShuffler = () => {
   const [cards, setCards] = useState([
-    { id: 1, title: 'Hardcoded Secrets', desc: 'Scan for exposed keys' },
-    { id: 2, title: 'Hallucinated Packages', desc: 'Verify imports against live registries' },
-    { id: 3, title: 'Injection Risks', desc: 'Detect unsanitized eval/exec' },
+    { id: 1, title: 'Hallucinated Packages', desc: 'Verify imports against live NPM registries' },
+    { id: 2, title: 'OWASP for AI', desc: 'Scan for Prompt Injection & RCE' },
+    { id: 3, title: 'Hardcoded Secrets', desc: 'Detect exposed API keys and tokens' },
   ]);
 
   useEffect(() => {
@@ -155,7 +155,7 @@ const DiagnosticShuffler = () => {
 
   return (
     <div className="relative h-64 w-full bg-primary rounded-[2rem] p-6 shadow-xl border border-dark/10 overflow-hidden flex flex-col justify-end">
-      <div className="absolute top-6 left-6 font-heading font-bold uppercase text-xs tracking-widest text-dark/50">VibeAudit</div>
+      <div className="absolute top-6 left-6 font-heading font-bold uppercase text-xs tracking-widest text-dark/50">VibeAudit (Static)</div>
       <div className="relative h-32 w-full mt-auto">
         {cards.map((card, i) => (
           <div 
@@ -180,8 +180,8 @@ const DiagnosticShuffler = () => {
         ))}
       </div>
       <div className="mt-6 z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">One-click security scan for vibe projects</h3>
-        <p className="font-data text-xs text-dark/70 leading-relaxed">Every save, every deploy — security without friction. Detects OWASP Top 10, hallucinated packages, hardcoded secrets.</p>
+        <h3 className="font-heading font-bold text-xl mb-1">Catch AI Hallucinations</h3>
+        <p className="font-data text-xs text-dark/70 leading-relaxed">The only scanner that cross-references AI-generated imports with live registries to prevent supply chain attacks.</p>
       </div>
     </div>
   );
@@ -190,15 +190,21 @@ const DiagnosticShuffler = () => {
 // --- Features: SecretShield ---
 const SecretShieldTypewriter = () => {
   const [text, setText] = useState('');
-  const fullText = "> ROTATING_API_KEY...\n> SYNCING_ENV_VARS...\n> SECURE_TUNNEL_ESTABLISHED.\n> ALL_SECRETS_SHIELDED.";
+  const messages = [
+    "[AGENTGUARD] Intercepting child_process.exec()",
+    "[AGENTGUARD] Command string matched: rm -rf /",
+    "[AGENTGUARD] Threat detected. Blocking execution.",
+    "[AGENTGUARD] Threat logged to telemetry server.",
+    "[AGENTGUARD] Sandbox integrity verified."
+  ];
 
   useEffect(() => {
     let current = 0;
     const type = () => {
-      setText(fullText.slice(0, current));
+      setText(messages[current % messages.length]);
       current++;
-      if (current <= fullText.length) {
-        setTimeout(type, Math.random() * 50 + 30);
+      if (current <= messages.length) {
+        setTimeout(type, 1500);
       } else {
         setTimeout(() => { current = 0; type(); }, 4000);
       }
@@ -209,17 +215,27 @@ const SecretShieldTypewriter = () => {
   return (
     <div className="relative h-64 w-full bg-dark text-primary rounded-[2rem] p-6 shadow-xl overflow-hidden flex flex-col">
       <div className="flex justify-between items-center mb-4">
-        <div className="font-heading font-bold uppercase text-xs tracking-widest text-primary/50">SecretShield</div>
+        <div className="font-heading font-bold uppercase text-xs tracking-widest text-primary/50">AgentGuard (Runtime)</div>
         <div className="flex items-center gap-2 text-[10px] font-data text-accent">
-          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" /> LIVE FEED
+          <span className="w-2 h-2 rounded-full bg-accent animate-pulse" /> LIVE LOGS
         </div>
       </div>
       <div className="flex-1 bg-black/50 rounded-xl p-4 font-data text-xs whitespace-pre-wrap flex flex-col justify-end">
         <span>{text}<span className="inline-block w-2 h-3 bg-accent ml-1 animate-pulse" /></span>
       </div>
       <div className="mt-6 z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">Dead-simple secrets management</h3>
-        <p className="font-data text-xs text-primary/70 leading-relaxed">Most vibe coders paste keys directly into code. This is catastrophic. We auto-detect, rotate, and sync to cloud.</p>
+        <h3 className="font-heading font-bold text-xl mb-1">Monkey-patches Node.js</h3>
+        <p className="font-data text-xs text-primary/70 leading-relaxed">
+          {(() => {
+            const steps = [
+              { num: '01', title: 'The Free Audit', desc: 'Scan your repository in seconds. See exactly where your AI left you exposed to supply chain attacks.' },
+              { num: '02', title: 'AgentGuard Sandbox', desc: 'Upgrade to Pro. Drop in our SDK to physically block dangerous commands and prompt injections at runtime.' },
+              { num: '03', title: 'The VibeCert Badge', desc: 'Embed your passing security score on your landing page to build trust and close enterprise deals.' }
+            ];
+            return null;
+          })()}
+          Blocks rogue autonomous agents from executing destructive system commands or exfiltrating data.
+        </p>
       </div>
     </div>
   );
@@ -291,8 +307,8 @@ const CursorProtocolScheduler = () => {
       </div>
 
       <div className="mt-auto z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">A trust badge for vibe-coded products</h3>
-        <p className="font-data text-xs text-dark/70 leading-relaxed">3 in 5 Lovable builders plan to monetize. VCs and customers need trust signals. The "SOC 2 for indie hackers."</p>
+        <h3 className="font-heading font-bold text-xl mb-1">Public Trust Badges</h3>
+        <p className="font-data text-xs text-dark/70 leading-relaxed">Embed your passing security score on your landing page. Prove to customers that your AI codebase is secure.</p>
       </div>
     </div>
   );
@@ -390,12 +406,14 @@ const Philosophy = () => {
       </div>
       <div className="relative z-10 max-w-4xl mx-auto">
         <p className="manifesto-line font-data text-primary/60 text-sm md:text-lg mb-8 tracking-widest uppercase">
-          Most tools focus on: enterprise compliance.
+          Legacy security scanners look for bad code.
         </p>
         <p className="manifesto-line font-heading font-bold text-3xl md:text-6xl leading-[1.1] uppercase tracking-tighter">
-          We focus on: <br/>
-          <span className="font-drama italic text-accent normal-case md:text-[5.5rem]">protecting builders</span> <br/>
-          from personal liability.
+          We hunt <br/>
+          <span className="font-drama italic text-accent normal-case md:text-[5.5rem]">AI Hallucinations.</span>
+        </p>
+        <p className="manifesto-line font-data text-primary/80 mt-8 text-lg max-w-2xl leading-relaxed">
+          Traditional tools miss the massive supply chain risks introduced by AI coding assistants. We actively ping the NPM registry to catch non-existent packages before attackers register them with malware.
         </p>
       </div>
     </section>
@@ -487,9 +505,9 @@ const Protocol = () => {
 
   return (
     <section id="protocol" ref={container} className="relative bg-background">
-      <ProtocolCard step="01" title="Scan" desc="We run deep static analysis across your codebase. Finding hardcoded secrets, hallucinated packages, and OWASP Top 10 patterns before you deploy." animType="scan" />
-      <ProtocolCard step="02" title="Rotate" desc="Automated API key detection and rotation. We handle the environment variables so you don't leak your keys and get financially ruined." animType="rotate" />
-      <ProtocolCard step="03" title="Certify" desc="Earn the VibeCert badge. Prove your security posture to customers and investors instantly, providing ultimate peace of mind." animType="pulse" isLast={true} />
+      <ProtocolCard step="01" title="The Free Audit" desc="Scan your repository in seconds. See exactly where your AI left you exposed to supply chain attacks and hallucinated packages." animType="scan" />
+      <ProtocolCard step="02" title="AgentGuard Sandbox" desc="Upgrade to Pro. Drop in our SDK to physically block dangerous commands and prompt injections at runtime." animType="rotate" />
+      <ProtocolCard step="03" title="The VibeCert Badge" desc="Embed your passing security score on your landing page to build trust and close enterprise deals." animType="pulse" isLast={true} />
     </section>
   );
 };
