@@ -84,6 +84,7 @@ export function promptFirewall(input, options = { mode: 'block' }) {
   const isMalicious = injectionSignatures.some(regex => regex.test(input));
   if (isMalicious) {
     console.error(`\x1b[31m[AgentGuard] PROMPT INJECTION DETECTED\x1b[0m`);
+    reportThreat(`[PROMPT INJECTION] ${input}`);
     if (options.mode === 'block') {
       throw new Error('[AgentGuard] Security Violation: Prompt injection attempt blocked.');
     }
@@ -104,6 +105,7 @@ export function outputFilter(output, options = { redact: true }) {
   for (const regex of piiRegexes) {
     if (regex.test(cleanOutput)) {
       console.warn(`\x1b[33m[AgentGuard] SENSITIVE INFO DISCLOSURE BLOCKED\x1b[0m`);
+      reportThreat(`[DLP VIOLATION] Detected sensitive data matching signature ${regex}`);
       if (options.redact) {
         cleanOutput = cleanOutput.replace(new RegExp(regex, 'g'), '[REDACTED BY AGENTGUARD]');
       } else {
@@ -133,6 +135,7 @@ export function rateLimitLLM(config = { maxRequests: 50, windowMs: 60000 }) {
       
       if (record.count > config.maxRequests) {
         console.error(`\x1b[31m[AgentGuard] UNBOUNDED CONSUMPTION BLOCKED\x1b[0m`);
+        reportThreat(`[RATE LIMIT EXCEEDED] >${config.maxRequests} requests per minute`);
         throw new Error('[AgentGuard] Rate limit exceeded to prevent DoS/Financial ruin.');
       }
       

@@ -66,8 +66,9 @@ const Navbar = ({ onOpenScanner }) => {
       <div className="flex items-center justify-between px-6 py-4">
         <div className="font-heading font-bold text-xl tracking-tight">VibeGuard</div>
         <div className="hidden md:flex gap-8 text-sm font-bold tracking-widest uppercase opacity-80">
-          <a href="#features" className="hover:text-accent transition-colors">Features</a>
-          <a href="#protocol" className="hover:text-accent transition-colors">Protocol</a>
+          <a href="/#features" className="hover:text-accent transition-colors">Features</a>
+          <a href="/#protocol" className="hover:text-accent transition-colors">Protocol</a>
+          <a href="/dashboard" className="hover:text-accent transition-colors">Dashboard</a>
         </div>
         <MagneticButton variant="primary" className="py-2 px-6 text-xs" onClick={onOpenScanner}>Run a free scan</MagneticButton>
       </div>
@@ -827,6 +828,7 @@ const Home = () => {
 };
 
 import CertPage from './CertPage';
+import Dashboard from './Dashboard';
 
 const App = () => {
   return (
@@ -834,6 +836,7 @@ const App = () => {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/cert/:id" element={<CertPage />} />
+        <Route path="/dashboard" element={<Dashboard />} />
       </Routes>
     </BrowserRouter>
   );

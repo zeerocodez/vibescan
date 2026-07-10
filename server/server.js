@@ -117,6 +117,20 @@ app.post('/api/agent/alert', async (req, res) => {
   }
 });
 
+// AgentGuard Telemetry Fetch
+app.get('/api/agent/telemetry', async (req, res) => {
+  try {
+    const alerts = await prisma.agentAlert.findMany({
+      take: 50,
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(alerts);
+  } catch (error) {
+    logger.error({ action: 'fetch_telemetry_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch telemetry' });
+  }
+});
+
 app.listen(PORT, () => {
   logger.info(`[VibeAudit] Production Backend server running on port ${PORT}`);
 });
