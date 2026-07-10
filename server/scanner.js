@@ -25,14 +25,21 @@ async function downloadRepoZip(owner, repo) {
     return response.data;
   } catch (error) {
     if (error.response?.status === 404) {
-      const mainUrl = `https://api.github.com/repos/${owner}/${repo}/zipball/main`;
-      const mainResponse = await axios.get(mainUrl, {
-        responseType: 'arraybuffer',
-        headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' }
-      });
-      return mainResponse.data;
+      try {
+        const mainUrl = `https://api.github.com/repos/${owner}/${repo}/zipball/main`;
+        const mainResponse = await axios.get(mainUrl, {
+          responseType: 'arraybuffer',
+          headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' }
+        });
+        return mainResponse.data;
+      } catch (mainError) {
+        if (mainError.response?.status === 404) {
+          throw new Error(`Repository '${owner}/${repo}' not found, is private, or has no master/main branch.`);
+        }
+        throw new Error('Failed to download repository from GitHub.');
+      }
     }
-    throw error;
+    throw new Error('Failed to connect to GitHub API.');
   }
 }
 
@@ -43,8 +50,23 @@ async function checkCVEs(dependencies) {
 
   try {
     // OSV API batch query
-    const queries = pkgs.map(pkg => ({ package: { name: pkg, ecosystem: 'npm' } }));
-    const response = await axios.post('https://api.osv.dev/v1/querybatch', { queries }, { timeout: 10000 });
+    const queries = pkgs.map(pkg => {
+      const rawVer = dependencies[pkg] || '';
+      // Strip ^, ~ or other prefixes to get a concrete version. If it's a weird format or *, default to latest or omit.
+      const versionMatch = rawVer.match(/\d+\.\d+\.\d+/);
+      const version = versionMatch ? versionMatch[0] : null;
+      
+      const query = { package: { name: pkg, ecosystem: 'npm' } };
+      if (version) query.version = version;
+      return query;
+    });
+    
+    // We only want to alert if a specific version is vulnerable
+    // However, if we omitted version, OSV returns ALL vulns. Let's filter queries that have a valid version.
+    const validQueries = queries.filter(q => q.version);
+    if (validQueries.length === 0) return findings;
+
+    const response = await axios.post('https://api.osv.dev/v1/querybatch', { queries: validQueries }, { timeout: 10000 });
     
     if (response.data?.results) {
       response.data.results.forEach((res, index) => {
@@ -52,9 +74,9 @@ async function checkCVEs(dependencies) {
           const vuln = res.vulns[0]; // Take the first known vulnerability
           findings.push({
             category: 'dependencies',
-            title: `Known Vulnerability in ${pkgs[index]}`,
+            title: `Known Vulnerability in ${validQueries[index].package.name}`,
             file: 'package.json',
-            message: `CRITICAL: The package ${pkgs[index]} has a known CVE (${vuln.id}). Upgrade immediately to prevent a known exploit.`
+            message: `CRITICAL: The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent a known exploit.`
           });
         }
       });

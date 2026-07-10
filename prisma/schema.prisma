@@ -42,3 +42,11 @@ model Finding {
   filePath       String?
   scan           Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
 }
+
+model AgentAlert {
+  id             String    @id @default(uuid())
+  projectId      String?
+  command        String
+  blocked        Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@vibeguard/agent",
+  "version": "1.0.0",
+  "description": "Runtime sandbox for AI agents",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["ai", "security", "sandbox", "agent"],
+  "author": "VibeGuard",
+  "license": "MIT"
+}

@@ -179,15 +179,15 @@ const DiagnosticShuffler = () => {
         ))}
       </div>
       <div className="mt-6 z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">Plain-language security scanning</h3>
-        <p className="font-data text-xs text-dark/70 leading-relaxed">No jargon. "Your OpenAI key is showing, tap to fix."</p>
+        <h3 className="font-heading font-bold text-xl mb-1">One-click security scan for vibe projects</h3>
+        <p className="font-data text-xs text-dark/70 leading-relaxed">Every save, every deploy — security without friction. Detects OWASP Top 10, hallucinated packages, hardcoded secrets.</p>
       </div>
     </div>
   );
 };
 
-// --- Features: Telemetry Typewriter ---
-const TelemetryTypewriter = () => {
+// --- Features: SecretShield ---
+const SecretShieldTypewriter = () => {
   const [text, setText] = useState('');
   const fullText = "> ROTATING_API_KEY...\n> SYNCING_ENV_VARS...\n> SECURE_TUNNEL_ESTABLISHED.\n> ALL_SECRETS_SHIELDED.";
 
@@ -217,8 +217,8 @@ const TelemetryTypewriter = () => {
         <span>{text}<span className="inline-block w-2 h-3 bg-accent ml-1 animate-pulse" /></span>
       </div>
       <div className="mt-6 z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">Automated secrets management</h3>
-        <p className="font-data text-xs text-primary/70 leading-relaxed">Auto-detects keys, rotates them, and syncs to cloud.</p>
+        <h3 className="font-heading font-bold text-xl mb-1">Dead-simple secrets management</h3>
+        <p className="font-data text-xs text-primary/70 leading-relaxed">Most vibe coders paste keys directly into code. This is catastrophic. We auto-detect, rotate, and sync to cloud.</p>
       </div>
     </div>
   );
@@ -290,8 +290,56 @@ const CursorProtocolScheduler = () => {
       </div>
 
       <div className="mt-auto z-20">
-        <h3 className="font-heading font-bold text-xl mb-1">Trust certification badge</h3>
-        <p className="font-data text-xs text-dark/70 leading-relaxed">The SOC 2 equivalent for builders. Prove security to investors.</p>
+        <h3 className="font-heading font-bold text-xl mb-1">A trust badge for vibe-coded products</h3>
+        <p className="font-data text-xs text-dark/70 leading-relaxed">3 in 5 Lovable builders plan to monetize. VCs and customers need trust signals. The "SOC 2 for indie hackers."</p>
+      </div>
+    </div>
+  );
+};
+
+// --- Features: AgentGuard ---
+const AgentGuardRadar = () => {
+  const container = useRef(null);
+  
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.to('.radar-sweep', { rotation: 360, transformOrigin: "50% 50%", duration: 4, repeat: -1, ease: "linear" });
+      
+      const tl = gsap.timeline({ repeat: -1, repeatDelay: 1 });
+      tl.set('.radar-ping', { scale: 0, opacity: 0 });
+      tl.to('.radar-ping', { scale: 1.5, opacity: 1, duration: 0.2, ease: "power2.out" });
+      tl.to('.radar-ping', { scale: 3, opacity: 0, duration: 1, ease: "power2.out" });
+      
+      tl.set('.blocked-text', { opacity: 0, y: 10 });
+      tl.to('.blocked-text', { opacity: 1, y: 0, duration: 0.2 }, "-=1");
+      tl.to('.blocked-text', { opacity: 0, duration: 0.2, delay: 1.5 });
+    }, container);
+    return () => ctx.revert();
+  }, []);
+
+  return (
+    <div ref={container} className="relative h-64 w-full bg-dark text-primary rounded-[2rem] p-6 shadow-xl border border-dark/10 overflow-hidden flex flex-col justify-end">
+      <div className="absolute top-6 left-6 font-heading font-bold uppercase text-xs tracking-widest text-primary/50">AgentGuard</div>
+      
+      <div className="relative mt-auto mb-6 flex justify-center items-center h-24">
+        <div className="absolute w-24 h-24 rounded-full border border-primary/20" />
+        <div className="absolute w-16 h-16 rounded-full border border-primary/20" />
+        <div className="absolute w-8 h-8 rounded-full border border-primary/20" />
+        
+        <div className="absolute w-24 h-24 rounded-full overflow-hidden">
+          <div className="radar-sweep absolute top-0 left-12 w-12 h-12 bg-gradient-to-br from-accent/40 to-transparent origin-bottom-left" />
+        </div>
+        
+        <div className="absolute w-2 h-2 rounded-full bg-accent radar-ping" style={{ top: '30%', left: '30%' }} />
+        
+        <div className="blocked-text absolute top-0 bg-accent text-primary font-data text-[8px] font-bold px-2 py-1 rounded shadow-lg uppercase whitespace-nowrap">
+          Access Denied: rm -rf /
+        </div>
+      </div>
+
+      <div className="mt-auto z-20">
+        <h3 className="font-heading font-bold text-xl mb-1">Monitors AI agents</h3>
+        <p className="font-data text-xs text-primary/70 leading-relaxed">As builders move to "AI-agent" workflows, AI gets broad access. We block dangerous operations.</p>
       </div>
     </div>
   );
@@ -303,9 +351,10 @@ const Features = () => {
       <div className="mb-16">
         <h2 className="font-heading font-bold text-4xl md:text-5xl uppercase tracking-tighter">Functional <br/>Artifacts.</h2>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <DiagnosticShuffler />
-        <TelemetryTypewriter />
+        <SecretShieldTypewriter />
+        <AgentGuardRadar />
         <CursorProtocolScheduler />
       </div>
     </section>
@@ -483,6 +532,54 @@ const Footer = ({ onOpenScanner }) => {
         </div>
       </footer>
     </>
+  );
+};
+
+// --- Pricing Section ---
+const Pricing = () => {
+  return (
+    <section id="pricing" className="py-32 px-6 md:px-12 bg-primary text-dark">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center mb-20">
+          <h2 className="font-heading font-bold text-5xl md:text-7xl uppercase tracking-tighter">Protect Your <br/><span className="font-drama italic text-accent normal-case">Livelihood.</span></h2>
+          <p className="font-data text-sm text-dark/70 mt-6 max-w-xl mx-auto">Don't let a hardcoded API key ruin your indie hacking journey. Upgrade to continuous, automated protection.</p>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          {/* Free Tier */}
+          <div className="border border-dark/20 rounded-[3rem] p-10 flex flex-col transition-transform hover:-translate-y-2 bg-background">
+            <div className="font-heading font-bold uppercase tracking-widest text-dark/50 text-sm mb-4">Starter</div>
+            <div className="font-heading font-bold text-6xl mb-8">Free</div>
+            <ul className="space-y-4 font-data text-sm text-dark/80 mb-12 flex-1">
+              <li className="flex items-center gap-3"><Shield size={16} className="text-dark/40" /> 1 Manual Scan per month</li>
+              <li className="flex items-center gap-3"><Shield size={16} className="text-dark/40" /> Basic hardcoded secrets detection</li>
+              <li className="flex items-center gap-3"><Shield size={16} className="text-dark/40" /> Public repo support only</li>
+            </ul>
+            <MagneticButton variant="outline" className="w-full py-4 text-xs">Run Free Scan</MagneticButton>
+          </div>
+          
+          {/* Pro Tier */}
+          <div className="border-2 border-accent rounded-[3rem] p-10 flex flex-col bg-dark text-primary shadow-2xl relative transition-transform hover:-translate-y-2">
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-accent text-primary font-heading font-bold uppercase tracking-widest text-[10px] px-4 py-2 rounded-full whitespace-nowrap">Recommended for Builders</div>
+            <div className="font-heading font-bold uppercase tracking-widest text-primary/50 text-sm mb-4">Pro</div>
+            <div className="flex items-end gap-2 mb-8">
+              <div className="font-heading font-bold text-6xl">$49</div>
+              <div className="font-data text-primary/50 text-sm mb-2">/ month</div>
+            </div>
+            <ul className="space-y-4 font-data text-sm text-primary/80 mb-12 flex-1">
+              <li className="flex items-center gap-3"><Shield size={16} className="text-accent" /> Unlimited automated VibeAudits</li>
+              <li className="flex items-center gap-3"><Shield size={16} className="text-accent" /> SecretShield auto-rotation enabled</li>
+              <li className="flex items-center gap-3 bg-accent/20 border border-accent/40 rounded-xl p-3 -mx-3">
+                <Shield size={16} className="text-accent" /> 
+                <span><strong className="text-white">AgentGuard Sandbox</strong> <span className="text-accent animate-pulse font-bold ml-2">NEW</span><br/><span className="text-xs text-primary/60">Runtime protection against rogue AI commands.</span></span>
+              </li>
+              <li className="flex items-center gap-3"><Shield size={16} className="text-accent" /> Official VibeCert Trust Badge</li>
+            </ul>
+            <MagneticButton variant="primary" className="w-full py-4 text-xs border border-transparent shadow-[0_0_20px_rgba(230,59,46,0.3)]">Upgrade to Pro</MagneticButton>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 };
 
@@ -667,6 +764,15 @@ const ScannerModal = ({ isOpen, onClose }) => {
                 placeholder="https://github.com/your-username/vibe-project" 
                 className="w-full bg-background border border-dark/20 rounded-xl px-6 py-4 font-data text-sm text-dark placeholder:text-dark/40 focus:outline-none focus:border-accent"
               />
+              
+              <div className="flex items-center justify-center w-full my-2">
+                <label className="flex flex-col items-center justify-center w-full py-6 border-2 border-dark/20 border-dashed rounded-xl cursor-pointer bg-background hover:bg-dark/5 transition-colors">
+                  <div className="flex flex-col items-center justify-center">
+                    <p className="text-xs font-data text-dark/50 uppercase tracking-widest"><span className="font-bold text-dark">Click to upload</span> a local .zip file instead</p>
+                  </div>
+                  <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleFileUpload} />
+                </label>
+              </div>
               {error && <div className="text-accent font-data text-xs">{error}</div>}
               <div className="flex gap-4">
                 <MagneticButton variant="primary" className="flex-1" onClick={handleScan}>Start Scan</MagneticButton>
@@ -690,6 +796,7 @@ function App() {
         <Features />
         <Philosophy />
         <Protocol />
+        <Pricing />
         <Footer onOpenScanner={() => setIsScannerOpen(true)} />
       </main>
       <ScannerModal isOpen={isScannerOpen} onClose={() => setIsScannerOpen(false)} />

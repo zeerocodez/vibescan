@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -92,6 +93,27 @@ app.get('/api/badge/:id.svg', async (req, res) => {
     res.send(svg);
   } catch (error) {
     res.status(500).send('Error generating badge');
+  }
+});
+
+// AgentGuard Alert Endpoint
+app.post('/api/agent/alert', async (req, res) => {
+  try {
+    const { projectId, command } = req.body;
+    
+    await prisma.agentAlert.create({
+      data: {
+        projectId: projectId || 'demo-project',
+        command,
+        blocked: true
+      }
+    });
+    
+    logger.warn({ action: 'agent_blocked', projectId, command });
+    res.status(200).json({ status: 'logged' });
+  } catch (error) {
+    logger.error({ action: 'agent_alert_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to log alert' });
   }
 });
 
