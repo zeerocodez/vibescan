@@ -152,7 +152,11 @@ export async function runScan(repoUrl, localFilePath = null) {
       aiRisks: [
         { regex: /(prompt|system_message|context)\s*(\+?=)\s*.*\b(req\.body|req\.query|userInput)\b/i, name: 'Prompt Injection Risk' },
         { regex: /role:\s*['"](system|user)['"],\s*content:\s*.*\b(req\.|input|body)\b/i, name: 'Unsanitized LLM Context' },
-        { regex: /(eval|exec|innerHTML)\s*=?\s*.*\b(response|completion|answer|reply|output)\b/i, name: 'Insecure LLM Output Handling' }
+        { regex: /(eval|exec|innerHTML)\s*=?\s*.*\b(response|completion|answer|reply|output)\b/i, name: 'Insecure LLM Output Handling' },
+        { regex: /fine_tunes\.create\(.*(fs\.createReadStream|req\.file)/i, name: 'Data and Training Poisoning' },
+        { regex: /res\.(send|json)\(.*(system_prompt|model_weights|fine_tuned_model)/i, name: 'Model Theft / Leakage' },
+        { regex: /(console\.log|res\.send|res\.json)\(.*(completion\.choices\[0\]\.message|response\.data)/i, name: 'Sensitive Information Disclosure (No DLP)' },
+        { regex: /openai\.chat\.completions\.create.*(?!.*max_tokens)/i, name: 'Unbounded Consumption Risk (Missing max_tokens)' }
       ]
     };
 
@@ -233,7 +237,7 @@ function translateToVibeLanguage(category, specificType) {
     injectionRisks: `A user could type malicious code into your form and your app would run it (${specificType}). You must sanitize user inputs immediately.`,
     accessGaps: "This page has no lock on the door (Wildcard CORS). Anyone can call your APIs directly from their own sketchy websites.",
     insecureDefaults: `Your app is still in test mode (${specificType}). It is telling visitors far more about your internal system than it should.`,
-    aiRisks: `AI Cybersecurity Risk detected (${specificType}). Passing raw user inputs to LLMs can lead to Prompt Injection, and trusting LLM outputs can lead to Remote Code Execution.`
+    aiRisks: `AI Cybersecurity Risk detected (${specificType}). Passing raw user inputs to LLMs can lead to Prompt Injection. Trusting outputs without a DLP filter can leak PII. Blindly uploading files can cause Training Poisoning, and missing rate limits can cause Unbounded Consumption.`
   };
   return translations[category] || "Security risk detected.";
 }
