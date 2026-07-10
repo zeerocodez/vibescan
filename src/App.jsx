@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Shield, ArrowRight, Zap, Lock, Terminal } from 'lucide-react';
@@ -584,6 +585,7 @@ const Pricing = () => {
 };
 
 const ScannerModal = ({ isOpen, onClose }) => {
+  const navigate = useNavigate();
   const [url, setUrl] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [results, setResults] = useState(null);
@@ -752,8 +754,11 @@ const ScannerModal = ({ isOpen, onClose }) => {
                 </div>
               )}
             </div>
-            <div className="mt-8">
-              <MagneticButton variant="outline" className="w-full" onClick={resetScanner}>Scan Another Repo</MagneticButton>
+            <div className="mt-8 flex gap-4">
+              <MagneticButton variant="outline" className="flex-1" onClick={resetScanner}>Scan Another</MagneticButton>
+              {results.score >= 80 && (
+                <MagneticButton variant="primary" className="flex-1" onClick={() => navigate(`/cert/${results.id || 'demo'}`)}>View VibeCert</MagneticButton>
+              )}
             </div>
           </div>
         ) : (
@@ -790,12 +795,20 @@ const ScannerModal = ({ isOpen, onClose }) => {
   );
 };
 
-function App() {
+const Home = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   return (
-    <div className="min-h-screen selection:bg-accent selection:text-primary">
+    <div className="min-h-screen bg-background text-dark selection:bg-accent selection:text-primary font-data overflow-x-hidden">
+      <svg className="hidden">
+        <filter id="noise">
+          <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
+        </filter>
+      </svg>
+      <div className="fixed inset-0 opacity-5 pointer-events-none z-50" style={{ filter: 'url(#noise)' }}></div>
+      
       <Navbar onOpenScanner={() => setIsScannerOpen(true)} />
+      
       <main>
         <Hero onOpenScanner={() => setIsScannerOpen(true)} />
         <Features />
@@ -807,6 +820,19 @@ function App() {
       <ScannerModal isOpen={isScannerOpen} onClose={() => setIsScannerOpen(false)} />
     </div>
   );
-}
+};
+
+import CertPage from './CertPage';
+
+const App = () => {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/cert/:id" element={<CertPage />} />
+      </Routes>
+    </BrowserRouter>
+  );
+};
 
 export default App;

@@ -87,6 +87,27 @@ async function checkCVEs(dependencies) {
   return findings;
 }
 
+async function checkHallucinatedPackages(dependencies) {
+  const findings = [];
+  const pkgs = Object.keys(dependencies);
+  
+  for (const pkg of pkgs) {
+    try {
+      await axios.head(`https://registry.npmjs.org/${pkg}`, { timeout: 3000 });
+    } catch (e) {
+      if (e.response?.status === 404) {
+        findings.push({
+          category: 'supply_chain',
+          title: `AI Hallucinated Package: ${pkg}`,
+          file: 'package.json',
+          message: `CRITICAL: The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 export async function runScan(repoUrl, localFilePath = null) {
   let owner = 'local', repo = 'upload';
   let zipBuffer;
@@ -171,6 +192,13 @@ export async function runScan(repoUrl, localFilePath = null) {
           if (cveFindings.length > 0) {
             scorePoints -= (cveFindings.length * 20);
             findings.push(...cveFindings);
+          }
+          
+          // Check for AI Hallucinated Packages
+          const hallucinatedFindings = await checkHallucinatedPackages(dependencies);
+          if (hallucinatedFindings.length > 0) {
+            scorePoints -= (hallucinatedFindings.length * 50); // Massive penalty for supply chain risks
+            findings.push(...hallucinatedFindings);
           }
         } catch (e) {}
       }
