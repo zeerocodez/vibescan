@@ -273,35 +273,70 @@ const VulnerabilityMatrix = () => {
     {
       title: "Audit & Investor Pressure",
       desc: "Regulators, investors, and customers are asking about security. You have no audit trail, no compliance proof, and no time to figure it out."
+    },
+    {
+      title: "Want to Sleep at Night?",
+      desc: "Deploy VibeScan now. Get instant codebase audits, real-time threat protection with VibeGuard, and SOC 2 aligned security badges.",
+      isPromo: true
     }
   ];
 
   return (
     <section ref={container} id="vulnerabilities" className="py-28 px-6 bg-background border-t border-dark/10">
       <div className="max-w-7xl mx-auto">
-        <header className="mb-20 max-w-3xl">
-          <div className="font-data text-accent text-xs uppercase tracking-widest font-bold mb-4">// THE HIDDEN COST OF VIBE CODING</div>
-          <h2 className="font-heading font-bold text-4xl md:text-6xl uppercase tracking-tighter leading-none">
-            What keeps vibe <br/>
-            <span className="font-drama italic text-dark/60 normal-case">coders awake at night.</span>
-          </h2>
-          <p className="font-data text-xs text-dark/70 mt-6 leading-relaxed">
-            Vibe coding feels amazing — until it does not. If you shipped AI-generated code straight into production, you might be carrying critical exposure.
-          </p>
+        <header className="mb-20 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-12 border-b border-dark/10 pb-12">
+          <div className="max-w-2xl">
+            <div className="font-data text-accent text-xs uppercase tracking-widest font-bold mb-4">// THE HIDDEN COST OF VIBE CODING</div>
+            <h2 className="font-heading font-bold text-4xl md:text-5xl lg:text-6xl uppercase tracking-tighter leading-none">
+              What keeps vibe <br/>
+              <span className="font-drama italic text-dark/60 normal-case">coders awake at night.</span>
+            </h2>
+            <p className="font-data text-xs text-dark/70 mt-6 leading-relaxed">
+              Vibe coding feels amazing — until it does not. If you shipped AI-generated code straight into production, you might be carrying critical exposure.
+            </p>
+          </div>
+          
+          <div className="w-full lg:w-[380px] shrink-0 h-48 md:h-56 bg-dark rounded-[2.5rem] border-2 border-dark overflow-hidden shadow-[6px_6px_0px_#111111] relative">
+            <img 
+              src="https://images.unsplash.com/photo-1542385150-13655b3eb4f6?q=80&w=800" 
+              alt="Brutalist concrete texture" 
+              className="w-full h-full object-cover opacity-80" 
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-dark/60 to-transparent" />
+            <div className="absolute bottom-4 left-6 font-data text-[9px] text-[#E8E4DD] tracking-wider uppercase font-bold">
+              [ Exposure Matrix Vector ]
+            </div>
+          </div>
         </header>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
           {concerns.map((item, idx) => (
             <div 
               key={idx} 
-              className="matrix-card bg-[#E8E4DD] border-2 border-dark rounded-[2rem] p-8 shadow-[6px_6px_0px_#111111] hover:translate-y-[-4px] hover:shadow-[10px_10px_0px_#111111] transition-all duration-300"
+              className={`matrix-card border-2 border-dark rounded-[2rem] p-8 shadow-[6px_6px_0px_#111111] hover:translate-y-[-4px] hover:shadow-[10px_10px_0px_#111111] transition-all duration-300 flex flex-col justify-between min-h-[220px] ${
+                item.isPromo 
+                  ? 'bg-accent text-background border-accent shadow-[6px_6px_0px_#111111]' 
+                  : 'bg-[#E8E4DD] text-dark'
+              }`}
             >
-              <div className="flex justify-between items-center mb-6">
-                <span className="font-data text-xs text-accent font-bold">CONCERN // 0{idx + 1}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              <div>
+                <div className="flex justify-between items-center mb-6">
+                  <span className={`font-data text-xs font-bold ${item.isPromo ? 'text-white' : 'text-accent'}`}>
+                    {item.isPromo ? 'SOLUTION' : `CONCERN // 0${idx + 1}`}
+                  </span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${item.isPromo ? 'bg-white' : 'bg-accent'} animate-pulse`} />
+                </div>
+                <h3 className="font-heading font-bold text-xl uppercase tracking-tight mb-4">{item.title}</h3>
+                <p className={`font-data text-xs leading-relaxed ${item.isPromo ? 'text-white/80' : 'text-dark/70'}`}>{item.desc}</p>
               </div>
-              <h3 className="font-heading font-bold text-xl uppercase tracking-tight mb-4">{item.title}</h3>
-              <p className="font-data text-xs text-dark/70 leading-relaxed">{item.desc}</p>
+              
+              {item.isPromo && (
+                <div className="mt-6 border-t border-white/20 pt-4 flex justify-end">
+                  <a href="#pricing" className="font-heading font-bold text-[10px] uppercase tracking-wider flex items-center gap-1 hover:text-white text-white">
+                    Unlock Performance Pro <ArrowRight size={14} />
+                  </a>
+                </div>
+              )}
             </div>
           ))}
         </div>
