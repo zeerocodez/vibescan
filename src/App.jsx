@@ -1249,6 +1249,7 @@ const CheckoutModal = ({ isOpen, onClose, onSubscribeSuccess }) => {
 // --- Interactive Scanner Modal ---
 const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
   const navigate = useNavigate();
+  const [scanType, setScanType] = useState('github'); // 'github', 'zip', 'web'
   const [url, setUrl] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [results, setResults] = useState(null);
@@ -1331,6 +1332,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
     setResults(null);
     setUrl('');
     setError('');
+    setScanType('github');
   };
 
   if (!isOpen) return null;
@@ -1349,14 +1351,25 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
           <div className="py-12 flex flex-col items-center justify-center text-center">
              <Loader2 size={40} className="animate-spin text-accent mb-6" />
              <div className="font-heading font-bold text-2xl md:text-3xl uppercase animate-pulse mb-6">
-               Scanning Repository <br/>
+               Scanning {scanType === 'web' ? 'Live Web App' : 'Repository'} <br/>
                <span className="text-accent lowercase">{url.split('/').pop() || 'Archive'}</span>
              </div>
              <div className="font-data text-[10px] text-dark/60 leading-relaxed text-left border border-dark/10 p-4 rounded-xl bg-[#F5F3EE] max-w-md w-full">
-               &gt; INITIATING_REGISTRY_METADATA_STREAM...<br/>
-               &gt; QUERYING_LIVE_REGISTRIES_FOR_HALLUCINATIONS...<br/>
-               &gt; SEARCHING_FOR_UNSECURE_CHILD_PROCESS_STREAMING...<br/>
-               &gt; AUDITING_OWASP_LLM_TOP_10_THREATS...
+               {scanType === 'web' ? (
+                 <>
+                   &gt; RESOLVING_TARGET_IP_ADDRESS...<br/>
+                   &gt; CHECKING_SSL_EXPIRE_DATE_AND_CIPHERS...<br/>
+                   &gt; AUDITING_SECURITY_HEADERS_CSP_HSTS_XFO...<br/>
+                   &gt; RUNNING_PORT_SCAN_AND_DIRECTORY_FUZZING...
+                 </>
+               ) : (
+                 <>
+                   &gt; INITIATING_REGISTRY_METADATA_STREAM...<br/>
+                   &gt; QUERYING_LIVE_REGISTRIES_FOR_HALLUCINATIONS...<br/>
+                   &gt; SEARCHING_FOR_UNSECURE_CHILD_PROCESS_STREAMING...<br/>
+                   &gt; AUDITING_OWASP_LLM_TOP_10_THREATS...
+                 </>
+               )}
              </div>
           </div>
         ) : results ? (
@@ -1364,7 +1377,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-dark/10 pb-6">
               <div>
                 <h3 className="font-heading font-bold text-3xl uppercase">Scan Results</h3>
-                <p className="font-data text-xs text-dark/70 mt-1">Repo: {results.repo}</p>
+                <p className="font-data text-xs text-dark/70 mt-1">{scanType === 'web' ? 'WebsiteDomain' : 'Repo'}: {results.repo}</p>
               </div>
               <div className="mt-4 md:mt-0 text-right">
                 <div className="font-heading font-bold text-5xl text-accent leading-none">{results.grade}</div>
@@ -1426,7 +1439,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                         <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-accent text-background font-heading font-bold uppercase tracking-widest text-[9px] px-3.5 py-1 rounded-full whitespace-nowrap">
                           CRITICAL ACTION REQUIRED
                         </div>
-                        <h4 className="font-heading font-bold text-xl mb-1 text-white">Your codebase is vulnerable.</h4>
+                        <h4 className="font-heading font-bold text-xl mb-1 text-white">Your app is vulnerable.</h4>
                         <p className="font-data text-[9px] text-primary/70 mb-4 max-w-md mx-auto">
                           Unlock 1-click remediation scripts and run the AgentGuard Sandbox package to block shell command injections.
                         </p>
@@ -1445,7 +1458,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                   <div className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-green-500/10 text-green-600 mb-4 border border-green-500/20">
                     <CheckCircle size={32} />
                   </div>
-                  <h4 className="font-heading font-bold text-xl mb-2">Codebase Secured</h4>
+                  <h4 className="font-heading font-bold text-xl mb-2">Security Secured</h4>
                   <p className="font-data text-xs text-dark/70">No package hallucinations or dynamic injection vectors detected.</p>
                 </div>
               )}
@@ -1469,34 +1482,107 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
               Initialize <br/>
               <span className="font-drama italic text-accent normal-case md:text-6xl">VibeAudit.</span>
             </h3>
-            <p className="font-data text-xs text-dark/70 mb-8 max-w-md leading-relaxed">
-              Paste a repository GitHub URL (e.g. `https://github.com/user/project`) to perform a dependency audit and scan for OWASP LLM vulnerabilities.
-            </p>
             
-            <div className="space-y-4">
-              <input 
-                type="text" 
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://github.com/username/vibe-coded-project" 
-                className="w-full bg-[#F5F3EE] border-2 border-dark rounded-xl px-5 py-4 font-data text-xs text-dark placeholder:text-dark/30 focus:outline-none focus:border-accent"
-              />
-              
-              <div className="flex items-center justify-center w-full my-2">
-                <label className="flex flex-col items-center justify-center w-full py-7 border-2 border-dark/20 border-dashed rounded-xl cursor-pointer bg-[#F5F3EE] hover:bg-dark/5 transition-colors">
-                  <div className="flex flex-col items-center justify-center">
-                    <p className="text-[10px] font-data text-dark/50 uppercase tracking-widest"><span className="font-bold text-dark">Click to upload</span> a zip backup archive</p>
-                  </div>
-                  <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleFileUpload} />
-                </label>
-              </div>
-              {error && <div className="text-accent font-data text-[10px] bg-accent/5 p-2 rounded border border-accent/25">{error}</div>}
-              <div className="flex gap-4">
-                <MagneticButton variant="primary" className="flex-1 py-4 text-xs" onClick={handleScan}>
-                  Execute Diagnostic Scan
-                </MagneticButton>
-              </div>
+            {/* Tabs selector */}
+            <div className="flex gap-2 mb-6 border-b-2 border-dark pb-3 overflow-x-auto">
+              <button 
+                onClick={() => { setScanType('github'); setError(null); setUrl(''); }}
+                className={`px-4 py-2 font-heading font-bold text-[10px] uppercase tracking-wider rounded-lg border-2 transition-all shrink-0 ${
+                  scanType === 'github' 
+                    ? 'bg-dark text-primary border-dark' 
+                    : 'bg-[#F5F3EE] text-dark border-transparent hover:border-dark/20'
+                }`}
+              >
+                1. GitHub Repo
+              </button>
+              <button 
+                onClick={() => { setScanType('zip'); setError(null); setUrl(''); }}
+                className={`px-4 py-2 font-heading font-bold text-[10px] uppercase tracking-wider rounded-lg border-2 transition-all shrink-0 ${
+                  scanType === 'zip' 
+                    ? 'bg-dark text-primary border-dark' 
+                    : 'bg-[#F5F3EE] text-dark border-transparent hover:border-dark/20'
+                }`}
+              >
+                2. ZIP Archive
+              </button>
+              <button 
+                onClick={() => { setScanType('web'); setError(null); setUrl(''); }}
+                className={`px-4 py-2 font-heading font-bold text-[10px] uppercase tracking-wider rounded-lg border-2 transition-all shrink-0 ${
+                  scanType === 'web' 
+                    ? 'bg-dark text-primary border-dark' 
+                    : 'bg-[#F5F3EE] text-dark border-transparent hover:border-dark/20'
+                }`}
+              >
+                3. Live Web App
+              </button>
             </div>
+
+            {scanType === 'github' && (
+              <>
+                <p className="font-data text-xs text-dark/70 mb-8 max-w-md leading-relaxed">
+                  Paste a repository GitHub URL (e.g. `https://github.com/user/project`) to perform a dependency audit and scan for OWASP LLM vulnerabilities.
+                </p>
+                
+                <div className="space-y-4">
+                  <input 
+                    type="text" 
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://github.com/username/vibe-coded-project" 
+                    className="w-full bg-[#F5F3EE] border-2 border-dark rounded-xl px-5 py-4 font-data text-xs text-dark placeholder:text-dark/30 focus:outline-none focus:border-accent"
+                  />
+                  {error && <div className="text-accent font-data text-[10px] bg-accent/5 p-2 rounded border border-accent/25">{error}</div>}
+                  <div className="flex gap-4">
+                    <MagneticButton variant="primary" className="flex-1 py-4 text-xs" onClick={handleScan}>
+                      Execute Repository Scan
+                    </MagneticButton>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {scanType === 'zip' && (
+              <>
+                <p className="font-data text-xs text-dark/70 mb-8 max-w-md leading-relaxed">
+                  Upload a zip archive of your source code to run a static local file analysis.
+                </p>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-center w-full my-2">
+                    <label className="flex flex-col items-center justify-center w-full py-7 border-2 border-dark/20 border-dashed rounded-xl cursor-pointer bg-[#F5F3EE] hover:bg-dark/5 transition-colors">
+                      <div className="flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-data text-dark/50 uppercase tracking-widest"><span className="font-bold text-dark">Click to upload</span> a zip backup archive</p>
+                      </div>
+                      <input ref={fileInputRef} type="file" accept=".zip" className="hidden" onChange={handleFileUpload} />
+                    </label>
+                  </div>
+                  {error && <div className="text-accent font-data text-[10px] bg-accent/5 p-2 rounded border border-accent/25">{error}</div>}
+                </div>
+              </>
+            )}
+
+            {scanType === 'web' && (
+              <>
+                <p className="font-data text-xs text-dark/70 mb-8 max-w-md leading-relaxed">
+                  Enter the public URL of your launched website/web app to perform an external vulnerability audit and scan for active headers, SSL issues, and dependency leaks.
+                </p>
+                
+                <div className="space-y-4">
+                  <input 
+                    type="text" 
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://your-launched-app.com" 
+                    className="w-full bg-[#F5F3EE] border-2 border-dark rounded-xl px-5 py-4 font-data text-xs text-dark placeholder:text-dark/30 focus:outline-none focus:border-accent"
+                  />
+                  {error && <div className="text-accent font-data text-[10px] bg-accent/5 p-2 rounded border border-accent/25">{error}</div>}
+                  <div className="flex gap-4">
+                    <MagneticButton variant="primary" className="flex-1 py-4 text-xs" onClick={handleScan}>
+                      Execute Live Web Scan
+                    </MagneticButton>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

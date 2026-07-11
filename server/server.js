@@ -6,7 +6,8 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import multer from 'multer';
 import pino from 'pino';
-import { scanQueue } from './queue.js';
+import { scanQueue, connection } from './queue.js';
+import { runScan } from './scanner.js';
 import { generateBadge } from './badge.js';
 import pg from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -30,6 +31,19 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
+const fallbackStore = new Map();
+let isRedisConnected = true;
+
+connection.on('error', (err) => {
+  logger.error({ action: 'redis_connection_error', error: err.message });
+  isRedisConnected = false;
+});
+
+connection.on('connect', () => {
+  logger.info({ action: 'redis_connected' });
+  isRedisConnected = true;
+});
+
 const scanLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, 
   max: 10, 
@@ -37,19 +51,46 @@ const scanLimiter = rateLimit({
 });
 
 const scanSchema = z.object({
-  url: z.string().url().regex(/^https:\/\/github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/, 'Must be a valid GitHub repository URL'),
+  url: z.string().url('Must be a valid URL (GitHub repository or launched web app)'),
 });
 
 app.post('/api/scan', scanLimiter, async (req, res) => {
   try {
-    const { url } = scanSchema.parse(req.body);
-    logger.info({ action: 'scan_queued', url });
+    let { url } = req.body;
+    if (typeof url === 'string') {
+      url = url.trim();
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+    }
+    const validatedData = scanSchema.parse({ url });
+    const validatedUrl = validatedData.url;
+    logger.info({ action: 'scan_queued', url: validatedUrl });
+    
+    if (!isRedisConnected) {
+      const scanId = 'mock-' + Math.random().toString(36).substr(2, 9);
+      fallbackStore.set(scanId, { status: 'active' });
+      
+      setTimeout(async () => {
+        try {
+          const report = await runScan(url);
+          fallbackStore.set(scanId, { status: 'completed', result: report });
+        } catch (err) {
+          fallbackStore.set(scanId, { status: 'failed', error: err.message });
+        }
+      }, 3000);
+      
+      return res.status(202).json({ scan_id: scanId, status: 'queued' });
+    }
     
     const job = await scanQueue.add('scan-repo', { url });
     
     res.status(202).json({ scan_id: job.id, status: 'queued' });
   } catch (error) {
-    if (error instanceof z.ZodError) return res.status(400).json({ error: error.errors[0].message });
+    logger.error({ action: 'scan_failed', error: error.message, stack: error.stack });
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0]?.message || error.message });
+    }
     logger.error({ action: 'queue_failed', error: error.message });
     res.status(500).json({ error: 'Internal server error while queueing scan.' });
   }
@@ -59,6 +100,23 @@ app.post('/api/scan/upload', scanLimiter, upload.single('file'), async (req, res
   try {
     if (!req.file) return res.status(400).json({ error: 'ZIP file is required.' });
     logger.info({ action: 'zip_uploaded', file: req.file.path });
+    
+    if (!isRedisConnected) {
+      const scanId = 'mock-' + Math.random().toString(36).substr(2, 9);
+      fallbackStore.set(scanId, { status: 'active' });
+      
+      const filePath = req.file.path;
+      setTimeout(async () => {
+        try {
+          const report = await runScan(null, filePath);
+          fallbackStore.set(scanId, { status: 'completed', result: report });
+        } catch (err) {
+          fallbackStore.set(scanId, { status: 'failed', error: err.message });
+        }
+      }, 3000);
+      
+      return res.status(202).json({ scan_id: scanId, status: 'queued' });
+    }
     
     const job = await scanQueue.add('scan-zip', { filePath: req.file.path });
     
@@ -71,7 +129,15 @@ app.post('/api/scan/upload', scanLimiter, upload.single('file'), async (req, res
 
 app.get('/api/scan/:id', async (req, res) => {
   try {
-    const job = await scanQueue.getJob(req.params.id);
+    const { id } = req.params;
+    if (id.startsWith('mock-') || !isRedisConnected) {
+      const job = fallbackStore.get(id);
+      if (job) {
+        return res.json(job);
+      }
+    }
+    
+    const job = await scanQueue.getJob(id);
     if (!job) return res.status(404).json({ error: 'Scan not found' });
     
     const state = await job.getState();
