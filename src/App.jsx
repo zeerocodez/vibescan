@@ -165,13 +165,16 @@ const Hero = ({ onOpenScanner, onOpenCheckout }) => {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from('.hero-fade-up', {
-        y: 50,
-        opacity: 0,
-        duration: 1,
-        stagger: 0.15,
-        ease: 'power3.out'
-      });
+      gsap.fromTo('.hero-fade-up', 
+        { y: 50, opacity: 0 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 1,
+          stagger: 0.15,
+          ease: 'power3.out'
+        }
+      );
     }, container);
     return () => ctx.revert();
   }, []);
@@ -238,17 +241,21 @@ const VulnerabilityMatrix = () => {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from('.matrix-card', {
-        scrollTrigger: {
-          trigger: container.current,
-          start: 'top 75%',
-        },
-        y: 45,
-        opacity: 0,
-        duration: 0.8,
-        stagger: 0.15,
-        ease: 'power2.out'
-      });
+      gsap.fromTo('.matrix-card', 
+        { y: 45, opacity: 0 },
+        {
+          scrollTrigger: {
+            trigger: container.current,
+            start: 'top 75%',
+            toggleActions: 'play none none none'
+          },
+          y: 0,
+          opacity: 1,
+          duration: 0.8,
+          stagger: 0.15,
+          ease: 'power2.out'
+        }
+      );
     }, container);
     return () => ctx.revert();
   }, []);
@@ -588,17 +595,21 @@ const Philosophy = () => {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from('.manifesto-reveal', {
-        scrollTrigger: {
-          trigger: container.current,
-          start: "top 75%",
-        },
-        y: 40,
-        opacity: 0,
-        duration: 1,
-        stagger: 0.2,
-        ease: "power3.out"
-      });
+      gsap.fromTo('.manifesto-reveal', 
+        { y: 40, opacity: 0 },
+        {
+          scrollTrigger: {
+            trigger: container.current,
+            start: "top 75%",
+            toggleActions: 'play none none none'
+          },
+          y: 0,
+          opacity: 1,
+          duration: 1,
+          stagger: 0.2,
+          ease: "power3.out"
+        }
+      );
     }, container);
     return () => ctx.revert();
   }, []);
