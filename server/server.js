@@ -14,6 +14,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pkg from '@prisma/client';
 import fs from 'fs';
 import AdmZip from 'adm-zip';
+import axios from 'axios';
 const { PrismaClient } = pkg;
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
@@ -684,42 +685,66 @@ app.get('/api/scans/:id/download', async (req, res) => {
   }
 });
 
-// Payments Checkout & Webhook Simulator
+// Payments Checkout & Webhook Simulator (Paystack)
 app.post('/api/payment/checkout', async (req, res) => {
   try {
     const user = await getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Authentication required.' });
     
-    // Simulate real stripe checkout session URL or fallback to sandbox
-    const checkoutUrl = `${req.protocol}://${req.get('host')}/payment/sandbox-checkout?email=${encodeURIComponent(user.email)}`;
+    // If Paystack Secret Key is configured, initialize real checkout link
+    if (process.env.PAYSTACK_SECRET_KEY) {
+      try {
+        const response = await axios.post('https://api.paystack.co/transaction/initialize', {
+          email: user.email,
+          amount: 500000, // ₦5,000 in Kobo units
+          callback_url: `${req.protocol}://${req.get('host')}/dashboard`
+        }, {
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        if (response.data?.status && response.data?.data?.authorization_url) {
+          return res.json({ url: response.data.data.authorization_url });
+        }
+      } catch (err) {
+        logger.error({ action: 'paystack_init_failed', error: err.response?.data?.message || err.message });
+      }
+    }
+
+    // Default Sandbox checkout redirect fallback
+    const checkoutUrl = `${req.protocol}://${req.get('host')}/payment/paystack-sandbox-checkout?email=${encodeURIComponent(user.email)}`;
     res.json({ url: checkoutUrl });
   } catch (error) {
     res.status(500).json({ error: 'Failed to initiate checkout.' });
   }
 });
 
-app.get('/payment/sandbox-checkout', (req, res) => {
+app.get('/payment/paystack-sandbox-checkout', (req, res) => {
   const { email } = req.query;
   res.send(`
     <html>
       <head>
-        <title>VibeScan Sandbox Billing Checkout</title>
+        <title>VibeScan Paystack Sandbox Checkout</title>
         <style>
           body { background: #0A0A14; color: #F0EFF4; font-family: monospace; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-          .card { border: 2px solid #7B61FF; padding: 40px; border-radius: 20px; max-width: 400px; text-align: center; background: #18181B; }
-          button { background: #7B61FF; color: #F0EFF4; border: none; padding: 12px 24px; font-weight: bold; cursor: pointer; border-radius: 8px; margin-top: 20px; text-transform: uppercase; font-family: monospace; }
-          button:hover { background: #6246E5; }
+          .card { border: 2px solid #009A9A; padding: 40px; border-radius: 20px; max-width: 400px; text-align: center; background: #12121A; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          button { background: #009A9A; color: #F0EFF4; border: none; padding: 12px 24px; font-weight: bold; cursor: pointer; border-radius: 8px; margin-top: 20px; text-transform: uppercase; font-family: monospace; transition: background 0.3s; }
+          button:hover { background: #007A7A; }
+          .logo { font-size: 24px; font-weight: bold; color: #009A9A; margin-bottom: 20px; display: block; }
         </style>
       </head>
       <body>
         <div class="card">
-          <h2>PRO Subscription Checkout</h2>
+          <span class="logo">paystack</span>
+          <h2>Initialize secure transaction</h2>
           <p>Email: <strong>${email}</strong></p>
-          <p>Sandbox Test Environment - Press button below to complete checkout simulation and fire Stripe webhooks.</p>
-          <form action="/api/payment/webhook" method="POST">
-            <input type="hidden" name="type" value="checkout.session.completed">
+          <p>Amount: <strong>₦5,000.00</strong></p>
+          <p>Sandbox Test Mode - Press below to execute simulated success transaction callback webhook.</p>
+          <form action="/api/payment/paystack-webhook" method="POST">
+            <input type="hidden" name="event" value="charge.success">
             <input type="hidden" name="email" value="${email}">
-            <button type="submit">Subscribe & Upgrade to PRO</button>
+            <button type="submit">Authorize Payment</button>
           </form>
         </div>
       </body>
@@ -727,35 +752,48 @@ app.get('/payment/sandbox-checkout', (req, res) => {
   `);
 });
 
-app.post('/api/payment/webhook', express.urlencoded({ extended: true }), express.json(), async (req, res) => {
+app.post('/api/payment/paystack-webhook', express.urlencoded({ extended: true }), express.json(), async (req, res) => {
   try {
-    const payload = req.body;
-    let email = null;
-    let type = null;
-
-    if (payload.type && payload.email) {
-      type = payload.type;
-      email = payload.email;
-    } else {
-      type = payload.type;
-      email = payload.data?.object?.customer_email || payload.data?.object?.email;
+    const signature = req.headers['x-paystack-signature'];
+    let payload = req.body;
+    
+    // Verify signature if key is present
+    if (process.env.PAYSTACK_SECRET_KEY && signature) {
+      const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+      if (hash !== signature) {
+        logger.warn({ action: 'paystack_webhook_invalid_signature' });
+        return res.status(400).send('Invalid webhook signature');
+      }
     }
 
-    if (type === 'checkout.session.completed' || type === 'customer.subscription.created') {
+    let email = null;
+    let eventName = null;
+
+    if (payload.event && payload.email) {
+      eventName = payload.event;
+      email = payload.email;
+    } else {
+      eventName = payload.event;
+      email = payload.data?.customer?.email;
+    }
+
+    if (eventName === 'charge.success') {
       if (email) {
         await prisma.user.update({
           where: { email },
           data: { tier: 'pro' }
         });
-        logger.info({ action: 'stripe_webhook_upgrade_pro', email });
+        logger.info({ action: 'paystack_webhook_upgrade_pro', email });
       }
-    } else if (type === 'customer.subscription.deleted') {
+    } else if (eventName === 'subscription.disable' || eventName === 'charge.failed') {
       if (email) {
         await prisma.user.update({
           where: { email },
           data: { tier: 'free' }
         });
-        logger.info({ action: 'stripe_webhook_downgrade_free', email });
+        logger.info({ action: 'paystack_webhook_downgrade_free', email });
       }
     }
 
@@ -763,8 +801,8 @@ app.post('/api/payment/webhook', express.urlencoded({ extended: true }), express
       return res.send(`
         <html>
           <body style="background: #0A0A14; color: #F0EFF4; font-family: monospace; text-align: center; padding-top: 100px;">
-            <h3>Success! Subscription Activated.</h3>
-            <p>Redirecting back to dashboard...</p>
+            <h3>Paystack Checkout Completed!</h3>
+            <p>Redirecting to VibeScan Dashboard...</p>
             <script>
               localStorage.setItem('vibescan_pro_active', 'true');
               setTimeout(() => { window.location.href = '/dashboard'; }, 2000);
@@ -774,9 +812,9 @@ app.post('/api/payment/webhook', express.urlencoded({ extended: true }), express
       `);
     }
 
-    res.json({ received: true });
+    res.json({ status: 'success' });
   } catch (error) {
-    logger.error({ action: 'webhook_failed', error: error.message });
+    logger.error({ action: 'paystack_webhook_failed', error: error.message });
     res.status(500).json({ error: 'Webhook processing failed.' });
   }
 });
