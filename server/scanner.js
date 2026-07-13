@@ -17,10 +17,16 @@ function parseGitHubUrl(url) {
 
 async function downloadRepoZip(owner, repo) {
   const url = `https://api.github.com/repos/${owner}/${repo}/zipball/master`;
+  const token = process.env.GITHUB_TOKEN;
+  const headers = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' };
+  if (token) {
+    headers['Authorization'] = `token ${token}`;
+  }
+
   try {
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
-      headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' }
+      headers
     });
     return response.data;
   } catch (error) {
@@ -29,7 +35,7 @@ async function downloadRepoZip(owner, repo) {
         const mainUrl = `https://api.github.com/repos/${owner}/${repo}/zipball/main`;
         const mainResponse = await axios.get(mainUrl, {
           responseType: 'arraybuffer',
-          headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' }
+          headers
         });
         return mainResponse.data;
       } catch (mainError) {
