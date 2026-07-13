@@ -1965,7 +1965,6 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
 // --- Landing Page Container ---
 const Home = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('vibescan_user') || 'null');
@@ -1984,14 +1983,27 @@ const Home = () => {
     }
   }, [user]);
 
-  const handleSubscribeSuccess = () => {
-    setIsPro(true);
-    localStorage.setItem('vibescan_pro_active', 'true');
-    // Also update backend user tier if logged in
-    if (user) {
-      const updatedUser = { ...user, tier: 'pro' };
-      localStorage.setItem('vibescan_user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
+  const handleOpenCheckout = async () => {
+    if (!user) {
+      alert("Please log in using Google Auth first to register your subscription account.");
+      return;
+    }
+    try {
+      const token = user.token || user.email;
+      const res = await fetch('/api/payment/checkout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+        }
+      } else {
+        alert("Authentication failed. Please log in again.");
+      }
+    } catch (err) {
+      alert("Failed to initiate checkout session.");
     }
   };
 
@@ -2006,7 +2018,7 @@ const Home = () => {
       
       <Navbar 
         onOpenScanner={() => setIsScannerOpen(true)} 
-        onOpenCheckout={() => setIsCheckoutOpen(true)}
+        onOpenCheckout={handleOpenCheckout}
         isPro={isPro}
         user={user}
         setUser={setUser}
@@ -2015,7 +2027,7 @@ const Home = () => {
       <main>
         <Hero 
           onOpenScanner={() => setIsScannerOpen(true)} 
-          onOpenCheckout={() => setIsCheckoutOpen(true)}
+          onOpenCheckout={handleOpenCheckout}
         />
         <VulnerabilityMatrix />
         <Capabilities />
@@ -2024,7 +2036,7 @@ const Home = () => {
         <Protocol />
         <Testimonials />
         <Pricing 
-          onOpenCheckout={() => setIsCheckoutOpen(true)}
+          onOpenCheckout={handleOpenCheckout}
           isPro={isPro}
         />
         <FAQ />
@@ -2035,13 +2047,7 @@ const Home = () => {
         isOpen={isScannerOpen} 
         onClose={() => setIsScannerOpen(false)} 
         isPro={isPro}
-        onOpenCheckout={() => setIsCheckoutOpen(true)}
-      />
-
-      <CheckoutModal 
-        isOpen={isCheckoutOpen} 
-        onClose={() => setIsCheckoutOpen(false)} 
-        onSubscribeSuccess={handleSubscribeSuccess}
+        onOpenCheckout={handleOpenCheckout}
       />
     </div>
   );

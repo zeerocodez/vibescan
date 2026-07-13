@@ -239,7 +239,19 @@ export default function Dashboard() {
                       scans.map((scan) => (
                         <tr key={scan.id} className="log-entry hover:bg-white/5 transition-colors">
                           <td className="p-4 max-w-xs truncate font-mono font-bold text-primary" title={scan.repoUrl}>
-                            {scan.repoUrl}
+                            <div>{scan.repoUrl}</div>
+                            {scan.prLink && (
+                              <div className="mt-1">
+                                <a 
+                                  href={scan.prLink} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[9px] bg-accent/20 hover:bg-accent text-accent hover:text-dark px-2 py-0.5 rounded font-mono font-bold transition-all border border-accent/25"
+                                >
+                                  PR Opened
+                                </a>
+                              </div>
+                            )}
                           </td>
                           <td className="p-4">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] uppercase tracking-widest font-bold font-mono ${
@@ -261,14 +273,28 @@ export default function Dashboard() {
                             {scan._count?.findings ?? 0}
                           </td>
                           <td className="p-4 text-primary/60">{new Date(scan.createdAt).toLocaleString()}</td>
-                          <td className="p-4 text-right flex justify-end gap-2">
+                          <td className="p-4 text-right flex justify-end gap-2 items-center">
                             <button
                               onClick={() => handleViewFindings(scan.id)}
-                              className="bg-background/5 hover:bg-primary hover:text-dark border border-primary/20 rounded p-1 transition-colors"
+                              className="bg-background/5 hover:bg-primary hover:text-dark border border-primary/20 rounded p-1.5 transition-colors"
                               title="View Findings Detail"
                             >
                               <Eye size={12} />
                             </button>
+                            {scan.status === 'completed' && scan.localFilePath && (
+                              <a
+                                href={`${VIBEGUARD_URL}/api/scans/${scan.id}/download?Authorization=Bearer ${token}`}
+                                download
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  window.open(`${VIBEGUARD_URL}/api/scans/${scan.id}/download?Authorization=Bearer ${token}`, '_blank');
+                                }}
+                                className="bg-green-600/25 hover:bg-green-600 border border-green-600/35 text-green-400 hover:text-white px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-widest font-mono transition-all"
+                                title="Download Patched ZIP"
+                              >
+                                Download Fix
+                              </a>
+                            )}
                             {scan.status === 'completed' && (scan._count?.findings ?? 0) > 0 && (
                               <button
                                 onClick={() => handleFixScan(scan.id)}

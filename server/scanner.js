@@ -125,6 +125,11 @@ function getFilesFromZip(zipBuffer) {
   const entries = zip.getEntries();
   const files = [];
   
+  let totalSize = 0;
+  let fileCount = 0;
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB limit
+  const MAX_FILES = 80;              // 80 files limit
+
   for (const entry of entries) {
     if (entry.isDirectory) continue;
     
@@ -149,16 +154,50 @@ function getFilesFromZip(zipBuffer) {
     }
     
     try {
-      const content = entry.getData().toString('utf8');
+      const data = entry.getData();
+      
+      // Zip bomb / size mitigation
+      totalSize += data.length;
+      fileCount++;
+      if (totalSize > MAX_SIZE) {
+        throw new Error('Repository exceeds safety scan limits (Max size: 10MB).');
+      }
+      if (fileCount > MAX_FILES) {
+        throw new Error('Repository exceeds safety scan limits (Max files: 80).');
+      }
+
+      const content = data.toString('utf8');
       if (content.includes('\u0000')) continue;
       
       const parts = entry.entryName.split('/');
       const filePath = parts.length > 1 ? parts.slice(1).join('/') : entry.entryName;
       
       files.push({ filePath, content });
-    } catch (e) {}
+    } catch (e) {
+      if (e.message.includes('safety scan limits')) {
+        throw e;
+      }
+    }
   }
   return files;
+}
+
+function applyLocalDlp(content) {
+  if (typeof content !== 'string') return content;
+  let redacted = content;
+  // Redact OpenAI keys
+  redacted = redacted.replace(/sk-[a-zA-Z0-9]{32,}/g, (m) => `sk-...[REDACTED_DLP_${m.slice(-4)}]`);
+  // Redact AWS credentials
+  redacted = redacted.replace(/AKIA[0-9A-Z]{16}/g, (m) => `AKIA...[REDACTED_DLP_${m.slice(-4)}]`);
+  // Redact Stripe keys
+  redacted = redacted.replace(/(sk_live|sk_test)_[0-9a-zA-Z]{24}/g, (m) => `sk_...[REDACTED_DLP_${m.slice(-4)}]`);
+  // Redact Slack webhooks
+  redacted = redacted.replace(/https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9_]{8}\/B[A-Z0-9_]{8}\/[A-Za-z0-9_]{24}/g, '[REDACTED_SLACK_WEBHOOK]');
+  // Redact JWT secrets
+  redacted = redacted.replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, '[REDACTED_JWT_TOKEN]');
+  // Redact DB URLs
+  redacted = redacted.replace(/postgres:\/\/[^:]+:[^@]+@/g, 'postgres://[REDACTED_DB_CREDENTIALS]@');
+  return redacted;
 }
 
 async function runGeminiAudit(files, repoName) {
@@ -169,7 +208,7 @@ async function runGeminiAudit(files, repoName) {
     .map(
       (f) => `
 === File: ${f.filePath} ===
-${f.content.substring(0, 8000)}
+${applyLocalDlp(f.content).substring(0, 8000)}
 `
     )
     .join('\n');

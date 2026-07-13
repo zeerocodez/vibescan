@@ -24,7 +24,7 @@ export const scanWorker = new Worker('scan-jobs', async (job) => {
   
   try {
     const scanRecord = await prisma.scan.create({
-      data: { id: job.id, repoUrl: identifier, status: 'scanning', userId }
+      data: { id: job.id, repoUrl: identifier, status: 'scanning', userId, localFilePath: filePath || null }
     });
     
     const startTime = Date.now();

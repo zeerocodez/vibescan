@@ -27,6 +27,8 @@ model Scan {
   durationMs     Int?
   totalFiles     Int       @default(0)
   totalLines     Int       @default(0)
+  localFilePath  String?
+  prLink         String?
   createdAt      DateTime  @default(now())
   user           User?     @relation(fields: [userId], references: [id])
   findings       Finding[]
