@@ -18,13 +18,13 @@ export const connection = new IORedis(process.env.REDIS_URL || 'redis://localhos
 export const scanQueue = new Queue('scan-jobs', { connection });
 
 export const scanWorker = new Worker('scan-jobs', async (job) => {
-  const { url, filePath } = job.data;
+  const { url, filePath, userId } = job.data;
   const identifier = url || filePath;
   console.log(`[Worker] Starting job ${job.id} for ${identifier}`);
   
   try {
     const scanRecord = await prisma.scan.create({
-      data: { id: job.id, repoUrl: identifier, status: 'scanning' }
+      data: { id: job.id, repoUrl: identifier, status: 'scanning', userId }
     });
     
     const startTime = Date.now();
@@ -43,10 +43,16 @@ export const scanWorker = new Worker('scan-jobs', async (job) => {
         findings: {
           create: report.findings.map(f => ({
             category: f.category,
-            severity: f.category === 'hardcodedSecrets' ? 'CRITICAL' : 'HIGH',
+            severity: f.severity || (f.category === 'hardcodedSecrets' ? 'CRITICAL' : 'HIGH'),
             title: f.title,
-            description: f.message,
-            filePath: f.file
+            description: f.description || f.message,
+            filePath: f.file || f.filePath,
+            lineNumber: f.lineNumber || null,
+            snippet: f.snippet || null,
+            fixSuggestion: f.fixSuggestion || null,
+            fixSnippet: f.fixSnippet || null,
+            cweId: f.cweId || null,
+            cveId: f.cveId || null
           }))
         }
       }

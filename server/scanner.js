@@ -49,10 +49,8 @@ async function checkCVEs(dependencies) {
   if (pkgs.length === 0) return findings;
 
   try {
-    // OSV API batch query
     const queries = pkgs.map(pkg => {
       const rawVer = dependencies[pkg] || '';
-      // Strip ^, ~ or other prefixes to get a concrete version. If it's a weird format or *, default to latest or omit.
       const versionMatch = rawVer.match(/\d+\.\d+\.\d+/);
       const version = versionMatch ? versionMatch[0] : null;
       
@@ -61,8 +59,6 @@ async function checkCVEs(dependencies) {
       return query;
     });
     
-    // We only want to alert if a specific version is vulnerable
-    // However, if we omitted version, OSV returns ALL vulns. Let's filter queries that have a valid version.
     const validQueries = queries.filter(q => q.version);
     if (validQueries.length === 0) return findings;
 
@@ -71,12 +67,20 @@ async function checkCVEs(dependencies) {
     if (response.data?.results) {
       response.data.results.forEach((res, index) => {
         if (res.vulns && res.vulns.length > 0) {
-          const vuln = res.vulns[0]; // Take the first known vulnerability
+          const vuln = res.vulns[0];
           findings.push({
             category: 'dependencies',
+            severity: 'HIGH',
             title: `Known Vulnerability in ${validQueries[index].package.name}`,
             file: 'package.json',
-            message: `CRITICAL: The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent a known exploit.`
+            message: `The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent exploits.`,
+            description: `The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent exploits.`,
+            lineNumber: 1,
+            snippet: `"${validQueries[index].package.name}": "${dependencies[validQueries[index].package.name]}"`,
+            fixSuggestion: `Run npm install ${validQueries[index].package.name}@latest to upgrade the package version.`,
+            fixSnippet: `npm install ${validQueries[index].package.name}@latest`,
+            cweId: 'CWE-1395',
+            cveId: vuln.id
           });
         }
       });
@@ -97,16 +101,310 @@ async function checkHallucinatedPackages(dependencies) {
     } catch (e) {
       if (e.response?.status === 404) {
         findings.push({
-          category: 'supply_chain',
+          category: 'dependencies',
+          severity: 'CRITICAL',
           title: `AI Hallucinated Package: ${pkg}`,
           file: 'package.json',
-          message: `CRITICAL: The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`
+          message: `The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`,
+          description: `The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`,
+          lineNumber: 1,
+          snippet: `"${pkg}": "${dependencies[pkg]}"`,
+          fixSuggestion: `Verify the package name and verify whether it was hallucinated by an LLM assistant. Remove it from your package.json dependencies.`,
+          fixSnippet: `npm uninstall ${pkg}`,
+          cweId: 'CWE-1357',
+          cveId: null
         });
       }
     }
   }
   return findings;
 }
+
+function getFilesFromZip(zipBuffer) {
+  const zip = new AdmZip(Buffer.from(zipBuffer));
+  const entries = zip.getEntries();
+  const files = [];
+  
+  for (const entry of entries) {
+    if (entry.isDirectory) continue;
+    
+    const name = entry.entryName.toLowerCase();
+    if (
+      name.includes('node_modules/') ||
+      name.includes('.git/') ||
+      name.includes('dist/') ||
+      name.endsWith('.png') ||
+      name.endsWith('.jpg') ||
+      name.endsWith('.jpeg') ||
+      name.endsWith('.gif') ||
+      name.endsWith('.ico') ||
+      name.endsWith('.woff') ||
+      name.endsWith('.woff2') ||
+      name.endsWith('package-lock.json') ||
+      name.endsWith('yarn.lock') ||
+      name.endsWith('pnpm-lock.yaml') ||
+      name.endsWith('.zip')
+    ) {
+      continue;
+    }
+    
+    try {
+      const content = entry.getData().toString('utf8');
+      if (content.includes('\u0000')) continue;
+      
+      const parts = entry.entryName.split('/');
+      const filePath = parts.length > 1 ? parts.slice(1).join('/') : entry.entryName;
+      
+      files.push({ filePath, content });
+    } catch (e) {}
+  }
+  return files;
+}
+
+async function runGeminiAudit(files, repoName) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const fileSummary = files
+    .map(
+      (f) => `
+=== File: ${f.filePath} ===
+${f.content.substring(0, 8000)}
+`
+    )
+    .join('\n');
+
+  const prompt = `
+You are VibeScan, an elite AI Security Audit engine.
+Analyze the following files from the project "${repoName}" for security concerns.
+
+Identify items in these categories:
+1. "hardcodedSecrets": Hardcoded API keys (OpenAI 'sk-', AWS, Stripe, Slack webhooks, JWT tokens, Private Keys, DB URLs with passwords, committed .env files). CRITICAL/HIGH severity.
+2. "dependencies": Vulnerable dependencies or hallucinated packages.
+3. "owasp": OWASP risks (eval() usages, SQL string concatenations, debug modes, unvalidated inputs, innerHTML usage without sanitization).
+4. "accessGaps": access controls/gaps (CORS wildcard, missing HTTP headers, insecure routing).
+5. "insecureDefaults": code smells, weak cryptographic algorithm configurations, and other bad practices.
+6. "aiRisks": AI and LLM security issues (prompt injection, missing DLP, unbounded consumption).
+
+For each finding, provide:
+- "category": 'hardcodedSecrets' | 'dependencies' | 'owasp' | 'accessGaps' | 'insecureDefaults' | 'aiRisks'
+- "severity": 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
+- "title": Clean, short vulnerability title (e.g. "Exposed OpenAI API Key")
+- "description": Explanation of the risk
+- "filePath": Relative path of the file
+- "lineNumber": Approximate line number (1-indexed) where it starts
+- "snippet": The offending line of code (IMPORTANT: Redact/Mask the actual secret value! Never output the actual secret - use sk-abc123... or [REDACTED] inside the snippet).
+- "fixSuggestion": Clear, actionable advice on how to fix it in plain English
+- "fixSnippet": Code snippet showing the corrected implementation
+- "cweId": CWE identifier if applicable (e.g., "CWE-798", "CWE-94", "CWE-89")
+- "cveId": CVE identifier if applicable
+
+Project Source Files:
+${fileSummary}
+`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const requestBody = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            findings: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  category: { type: "STRING" },
+                  severity: { type: "STRING" },
+                  title: { type: "STRING" },
+                  description: { type: "STRING" },
+                  filePath: { type: "STRING" },
+                  lineNumber: { type: "INTEGER" },
+                  snippet: { type: "STRING" },
+                  fixSuggestion: { type: "STRING" },
+                  fixSnippet: { type: "STRING" },
+                  cweId: { type: "STRING" },
+                  cveId: { type: "STRING" }
+                },
+                required: ["category", "severity", "title", "description", "filePath"]
+              }
+            }
+          },
+          required: ["findings"]
+        }
+      }
+    };
+
+    const response = await axios.post(url, requestBody, { timeout: 25000 });
+    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (text) {
+      return JSON.parse(text);
+    }
+  } catch (error) {
+    console.error('Gemini AI audit failed, falling back to static engine:', error.message);
+  }
+  return null;
+}
+
+const staticRules = {
+  hardcodedSecrets: [
+    {
+      regex: /sk-[a-zA-Z0-9]{32,}/g,
+      title: 'Exposed OpenAI API Key',
+      severity: 'CRITICAL',
+      description: 'A hardcoded OpenAI API key was detected in the codebase. Anyone who accesses this code can use your account, run up your usage limits, and cause financial liability.',
+      fixSuggestion: 'Store your secret key in an environment variable (e.g., `process.env.OPENAI_API_KEY`) and load it dynamically.',
+      fixSnippet: 'const apiKey = process.env.OPENAI_API_KEY;',
+      cweId: 'CWE-798'
+    },
+    {
+      regex: /AKIA[0-9A-Z]{16}/g,
+      title: 'Exposed AWS Access Key ID',
+      severity: 'CRITICAL',
+      description: 'A hardcoded AWS Access Key ID was detected in the codebase. This could allow attackers to query or modify your AWS services.',
+      fixSuggestion: 'Use the AWS SDK credentials provider to load keys from system environment variables or IAM role configurations.',
+      fixSnippet: "const credentials = new AWS.EnvironmentCredentials('AWS');",
+      cweId: 'CWE-798'
+    },
+    {
+      regex: /(sk_live|sk_test)_[0-9a-zA-Z]{24}/g,
+      title: 'Exposed Stripe Secret Key',
+      severity: 'CRITICAL',
+      description: 'An exposed Stripe secret key was detected. Attackers can execute charges, refund transactions, or download customer databases.',
+      fixSuggestion: 'Move key to environment configuration and load it on server-side only.',
+      fixSnippet: 'const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);',
+      cweId: 'CWE-798'
+    },
+    {
+      regex: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/g,
+      title: 'Hardcoded Private Key',
+      severity: 'CRITICAL',
+      description: 'An exposed RSA/EC Private Key was detected in code. This allows complete server control compromise.',
+      fixSuggestion: 'Load cryptographic keys dynamically from a secure file system storage path or secrets manager.',
+      fixSnippet: "const cert = fs.readFileSync('/etc/ssl/certs/private.key');",
+      cweId: 'CWE-321'
+    },
+    {
+      regex: /https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9_]{8}\/B[A-Z0-9_]{8}\/[A-Za-z0-9_]{24}/g,
+      title: 'Exposed Slack Webhook URL',
+      severity: 'HIGH',
+      description: 'Exposed Slack webhooks allow spammers or attackers to send messages to your internal channels.',
+      fixSuggestion: 'Move the webhook URL to system environment variable.',
+      fixSnippet: 'const webhook = process.env.SLACK_WEBHOOK_URL;',
+      cweId: 'CWE-798'
+    },
+    {
+      regex: /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g,
+      title: 'Hardcoded JWT Secret Token',
+      severity: 'HIGH',
+      description: 'A hardcoded JWT sign or verify secret was found. Allows attackers to forge valid credentials and bypass authentication.',
+      fixSuggestion: 'Inject a cryptographically secure key via environment configurations.',
+      fixSnippet: 'jwt.verify(token, process.env.JWT_SECRET_KEY);',
+      cweId: 'CWE-321'
+    },
+    {
+      regex: /postgres:\/\/[^:]+:[^@]+@/g,
+      title: 'Database Plaintext Password Leak',
+      severity: 'CRITICAL',
+      description: 'Exposed database connection string containing plaintext passwords. Allows direct access to the application datastore.',
+      fixSuggestion: 'Load datastore credentials dynamically via system-level parameters.',
+      fixSnippet: 'const client = new Client({ connectionString: process.env.DATABASE_URL });',
+      cweId: 'CWE-798'
+    }
+  ],
+  injectionRisks: [
+    {
+      regex: /eval\s*\(/g,
+      title: 'Unsafe eval() Usage',
+      severity: 'HIGH',
+      description: 'Execution of eval() on unvalidated inputs allows Remote Code Execution (RCE) attacks.',
+      fixSuggestion: 'Refactor dynamic executions to use standard JSON.parse() or specific dynamic map structures.',
+      fixSnippet: 'const data = JSON.parse(input);',
+      cweId: 'CWE-94'
+    },
+    {
+      regex: /exec\s*\(/g,
+      title: 'Unsafe exec() Command Execution',
+      severity: 'HIGH',
+      description: 'Execution of arbitrary shell commands via exec() could allow OS Command Injection.',
+      fixSuggestion: 'Use execFile or parameterized arguments in spawn, avoiding shell execution mode.',
+      fixSnippet: "child_process.execFile('/usr/bin/git', ['clone', url]);",
+      cweId: 'CWE-78'
+    },
+    {
+      regex: /\.innerHTML\s*=/g,
+      title: 'Potential XSS via innerHTML',
+      severity: 'HIGH',
+      description: 'Setting innerHTML directly with user input allows Cross-Site Scripting (XSS).',
+      fixSuggestion: 'Use textContent or dynamic DOM methods to safely assign user content.',
+      fixSnippet: 'element.textContent = userInput;',
+      cweId: 'CWE-79'
+    },
+    {
+      regex: /\.(query|execute)\s*\(\s*`.*?\$\{.*?\}.*?`\s*\)/g,
+      title: 'SQL Query Concatenation',
+      severity: 'HIGH',
+      description: 'Detected raw database query execution using string concatenation. Vulnerable to SQL injection.',
+      fixSuggestion: 'Refactor to parameterize your SQL query parameters.',
+      fixSnippet: "db.query('SELECT * FROM users WHERE id = $1', [userId]);",
+      cweId: 'CWE-89'
+    }
+  ],
+  accessGaps: [
+    {
+      regex: /cors\(\s*\{\s*origin:\s*['"]\*['"]\s*\}\s*\)/g,
+      title: 'Wildcard CORS Policy',
+      severity: 'MEDIUM',
+      description: 'Configuring a wildcard (*) Access-Control-Allow-Origin header allows external scripts to interact with your services.',
+      fixSuggestion: 'Verify origin against an explicit list of trusted hosts.',
+      fixSnippet: "cors({ origin: ['https://trusteddomain.com'] });",
+      cweId: 'CWE-942'
+    }
+  ],
+  insecureDefaults: [
+    {
+      regex: /DEBUG\s*=\s*(True|true)/g,
+      title: 'Debug Mode Enabled',
+      severity: 'LOW',
+      description: 'Running in debug mode displays detailed internal framework details to external visitors, causing information leakage.',
+      fixSuggestion: 'Ensure debug flag is set to false in production.',
+      fixSnippet: 'const DEBUG = false;',
+      cweId: 'CWE-489'
+    },
+    {
+      regex: /rejectUnauthorized\s*:\s*false/g,
+      title: 'Insecure SSL Verification Disabled',
+      severity: 'HIGH',
+      description: 'Setting rejectUnauthorized to false disables server certificate verification, enabling Man-in-the-Middle (MitM) attacks.',
+      fixSuggestion: 'Always verify SSL certificates in production.',
+      fixSnippet: 'rejectUnauthorized: true,',
+      cweId: 'CWE-295'
+    }
+  ],
+  aiRisks: [
+    {
+      regex: /(prompt|system_message|context)\s*(\+?=)\s*.*\b(req\.body|req\.query|userInput)\b/i,
+      title: 'Prompt Injection Risk',
+      severity: 'HIGH',
+      description: 'Direct interpolation of user input inside system message prompts is vulnerable to jailbreaking or prompt injection.',
+      fixSuggestion: 'Sanitize user inputs and restrict system configuration instructions.',
+      fixSnippet: 'const messages = [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: sanitizeInput(userInput) }];',
+      cweId: 'CWE-1156'
+    },
+    {
+      regex: /openai\.chat\.completions\.create.*(?!.*max_tokens)/i,
+      title: 'Unbounded Consumption Risk',
+      severity: 'MEDIUM',
+      description: 'LLM completion calls without a max_tokens limit can allow denial of service or high API usage costs.',
+      fixSuggestion: 'Configure an explicit max_tokens option in the API config.',
+      fixSnippet: "openai.chat.completions.create({ model: 'gpt-4', messages, max_tokens: 150 });",
+      cweId: 'CWE-400'
+    }
+  ]
+};
 
 async function runWebScan(url) {
   let domain = 'unknown';
@@ -128,9 +426,16 @@ async function runWebScan(url) {
       scorePoints -= 15;
       findings.push({
         category: 'accessGaps',
+        severity: 'HIGH',
         title: 'Missing HTTP Strict Transport Security (HSTS)',
         file: 'HTTP Headers',
-        message: 'Your website does not enforce HTTPS via HSTS headers. Man-in-the-middle attackers could intercept and downgrade traffic.'
+        message: 'Your website does not enforce HTTPS via HSTS headers. Man-in-the-middle attackers could intercept and downgrade traffic.',
+        description: 'Your website does not enforce HTTPS via HSTS headers. Man-in-the-middle attackers could intercept and downgrade traffic.',
+        lineNumber: 1,
+        snippet: 'GET / HTTP/1.1',
+        fixSuggestion: 'Enable HSTS in your backend server security headers config.',
+        fixSnippet: "res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');",
+        cweId: 'CWE-523'
       });
     }
 
@@ -138,9 +443,16 @@ async function runWebScan(url) {
       scorePoints -= 25;
       findings.push({
         category: 'accessGaps',
+        severity: 'HIGH',
         title: 'Missing Content Security Policy (CSP)',
         file: 'HTTP Headers',
-        message: 'Your site does not define a CSP header. Attackers can execute unauthorized scripts or launch XSS exploits.'
+        message: 'Your site does not define a CSP header. Attackers can execute unauthorized scripts or launch XSS exploits.',
+        description: 'Your site does not define a CSP header. Attackers can execute unauthorized scripts or launch XSS exploits.',
+        lineNumber: 1,
+        snippet: 'GET / HTTP/1.1',
+        fixSuggestion: 'Implement a strict Content Security Policy (CSP) header.',
+        fixSnippet: "res.setHeader('Content-Security-Policy', \"default-src 'self'; script-src 'self' 'unsafe-inline'\");",
+        cweId: 'CWE-1021'
       });
     }
 
@@ -148,9 +460,16 @@ async function runWebScan(url) {
       scorePoints -= 15;
       findings.push({
         category: 'accessGaps',
+        severity: 'MEDIUM',
         title: 'Missing X-Frame-Options header',
         file: 'HTTP Headers',
-        message: 'Your pages do not block embedding. Attackers can frame your app to trick users into clicking invisible buttons (Clickjacking).'
+        message: 'Your pages do not block embedding. Attackers can frame your app to trick users into clicking invisible buttons (Clickjacking).',
+        description: 'Your pages do not block embedding. Attackers can frame your app to trick users into clicking invisible buttons (Clickjacking).',
+        lineNumber: 1,
+        snippet: 'GET / HTTP/1.1',
+        fixSuggestion: 'Set X-Frame-Options to DENY or SAMEORIGIN.',
+        fixSnippet: "res.setHeader('X-Frame-Options', 'DENY');",
+        cweId: 'CWE-1021'
       });
     }
 
@@ -158,24 +477,32 @@ async function runWebScan(url) {
       scorePoints -= 10;
       findings.push({
         category: 'insecureDefaults',
+        severity: 'LOW',
         title: 'Missing X-Content-Type-Options header',
         file: 'HTTP Headers',
-        message: 'Missing nosniff attribute. Browsers can guess content types and run text files as scripts.'
+        message: 'Missing nosniff attribute. Browsers can guess content types and run text files as scripts.',
+        description: 'Missing nosniff attribute. Browsers can guess content types and run text files as scripts.',
+        lineNumber: 1,
+        snippet: 'GET / HTTP/1.1',
+        fixSuggestion: 'Configure X-Content-Type-Options to nosniff.',
+        fixSnippet: "res.setHeader('X-Content-Type-Options', 'nosniff');",
+        cweId: 'CWE-79'
       });
     }
   } catch (e) {
     scorePoints = 75;
     findings.push({
       category: 'accessGaps',
+      severity: 'HIGH',
       title: 'Missing Content Security Policy (CSP)',
       file: 'HTTP Headers',
-      message: 'No CSP headers detected. Cross-site scripting vulnerabilities could be exploited.'
-    });
-    findings.push({
-      category: 'insecureDefaults',
-      title: 'Leaked Source Maps',
-      file: '/main.js.map',
-      message: 'Source maps are exposed publicly. Anyone can view your original client code files and reverse-engineer APIs.'
+      message: 'No CSP headers detected. Cross-site scripting vulnerabilities could be exploited.',
+      description: 'No CSP headers detected. Cross-site scripting vulnerabilities could be exploited.',
+      lineNumber: 1,
+      snippet: 'HTTP/1.1 Headers',
+      fixSuggestion: 'Configure Content Security Policy (CSP) to restrict scripts origin.',
+      fixSnippet: "app.use(helmet.contentSecurityPolicy());",
+      cweId: 'CWE-1021'
     });
   }
 
@@ -186,7 +513,6 @@ async function runWebScan(url) {
   else if (scorePoints < 90) grade = 'B';
 
   return {
-    id: 'web-' + Math.random().toString(36).substr(2, 9),
     repo: domain,
     grade,
     score: Math.max(0, scorePoints),
@@ -217,116 +543,125 @@ export async function runScan(repoUrl, localFilePath = null) {
   let scorePoints = 100;
   
   try {
-    const zip = new AdmZip(Buffer.from(zipBuffer));
-    const zipEntries = zip.getEntries();
+    const files = getFilesFromZip(zipBuffer);
     
-    const patterns = {
-      hardcodedSecrets: [
-        { regex: /sk-[a-zA-Z0-9]{32,}/g, name: 'OpenAI API Key' },
-        { regex: /AKIA[0-9A-Z]{16}/g, name: 'AWS Access Key ID' },
-        { regex: /(sk_live|sk_test)_[0-9a-zA-Z]{24}/g, name: 'Stripe Secret Key' },
-      ],
-      injectionRisks: [
-        { regex: /eval\s*\(/g, name: 'eval() function usage' },
-        { regex: /exec\s*\(/g, name: 'exec() command execution' },
-        { regex: /\.innerHTML\s*=/g, name: 'Unescaped HTML injection' },
-        { regex: /\.(query|execute)\s*\(\s*`.*?\$\{.*?\}.*?`\s*\)/g, name: 'SQL Query Concatenation' }
-      ],
-      accessGaps: [
-        { regex: /cors\(\s*\{\s*origin:\s*['"]\*['"]\s*\}\s*\)/g, name: 'Wildcard CORS Policy' },
-      ],
-      insecureDefaults: [
-        { regex: /DEBUG\s*=\s*(True|true)/g, name: 'Debug Mode Enabled' },
-      ],
-      aiRisks: [
-        { regex: /(prompt|system_message|context)\s*(\+?=)\s*.*\b(req\.body|req\.query|userInput)\b/i, name: 'Prompt Injection Risk' },
-        { regex: /role:\s*['"](system|user)['"],\s*content:\s*.*\b(req\.|input|body)\b/i, name: 'Unsanitized LLM Context' },
-        { regex: /(eval|exec|innerHTML)\s*=?\s*.*\b(response|completion|answer|reply|output)\b/i, name: 'Insecure LLM Output Handling' },
-        { regex: /fine_tunes\.create\(.*(fs\.createReadStream|req\.file)/i, name: 'Data and Training Poisoning' },
-        { regex: /res\.(send|json)\(.*(system_prompt|model_weights|fine_tuned_model)/i, name: 'Model Theft / Leakage' },
-        { regex: /(console\.log|res\.send|res\.json)\(.*(completion\.choices\[0\]\.message|response\.data)/i, name: 'Sensitive Information Disclosure (No DLP)' },
-        { regex: /openai\.chat\.completions\.create.*(?!.*max_tokens)/i, name: 'Unbounded Consumption Risk (Missing max_tokens)' }
-      ]
-    };
-
-    for (const entry of zipEntries) {
-      if (entry.isDirectory) continue;
-      const fileName = entry.entryName;
-      if (fileName.includes('node_modules/') || fileName.includes('.git/')) continue;
-      
-      const content = entry.getData().toString('utf8');
-      
-      for (const [category, ruleList] of Object.entries(patterns)) {
-        for (const rule of ruleList) {
-          if (rule.regex.test(content)) {
-            if (category === 'hardcodedSecrets') scorePoints -= 40;
-            else if (category === 'injectionRisks') scorePoints -= 30;
-            else if (category === 'aiRisks') scorePoints -= 35;
-            else if (category === 'accessGaps') scorePoints -= 20;
-            else if (category === 'insecureDefaults') scorePoints -= 15;
-
-            findings.push({
-              category,
-              title: rule.name,
-              file: fileName.split('/').slice(1).join('/'),
-              message: translateToVibeLanguage(category, rule.name)
+    let geminiReport = null;
+    if (process.env.GEMINI_API_KEY) {
+      console.log(`[Scanner] Running Google Gemini AI audit for ${owner}/${repo}`);
+      geminiReport = await runGeminiAudit(files, `${owner}/${repo}`);
+    }
+    
+    if (geminiReport && Array.isArray(geminiReport.findings)) {
+      geminiReport.findings.forEach(f => {
+        findings.push({
+          category: f.category || 'insecureDefaults',
+          severity: f.severity || 'HIGH',
+          title: f.title || 'Security Exposure',
+          file: f.filePath,
+          message: f.description || 'AI detected static vulnerability.',
+          description: f.description,
+          lineNumber: f.lineNumber || null,
+          snippet: f.snippet || null,
+          fixSuggestion: f.fixSuggestion || null,
+          fixSnippet: f.fixSnippet || null,
+          cweId: f.cweId || null,
+          cveId: f.cveId || null
+        });
+      });
+    } else {
+      console.log(`[Scanner] Running Static Heuristics fallback engine for ${owner}/${repo}`);
+      for (const file of files) {
+        const lines = file.content.split('\n');
+        
+        for (const [category, rules] of Object.entries(staticRules)) {
+          for (const rule of rules) {
+            lines.forEach((line, index) => {
+              rule.regex.lastIndex = 0;
+              if (rule.regex.test(line)) {
+                let snippet = line.trim();
+                if (category === 'hardcodedSecrets') {
+                  snippet = line.replace(rule.regex, (match) => {
+                    if (match.startsWith('sk-')) return `sk-...${match.slice(-6)}`;
+                    if (match.startsWith('AKIA')) return `AKIA...${match.slice(-4)}`;
+                    return '[REDACTED SECRET]';
+                  }).trim();
+                }
+                
+                findings.push({
+                  category,
+                  severity: rule.severity,
+                  title: rule.title,
+                  file: file.filePath,
+                  message: rule.description,
+                  description: rule.description,
+                  lineNumber: index + 1,
+                  snippet,
+                  fixSuggestion: rule.fixSuggestion,
+                  fixSnippet: rule.fixSnippet,
+                  cweId: rule.cweId,
+                  cveId: null
+                });
+              }
             });
           }
         }
-      }
 
-      if (fileName.endsWith('package.json') && !fileName.includes('node_modules')) {
-        try {
-          const pkg = JSON.parse(content);
-          const dependencies = { ...pkg.dependencies };
-          
-          // Check for CVEs via OSV API
-          const cveFindings = await checkCVEs(dependencies);
-          if (cveFindings.length > 0) {
-            scorePoints -= (cveFindings.length * 20);
+        if (file.filePath.endsWith('package.json')) {
+          try {
+            const pkg = JSON.parse(file.content);
+            const dependencies = { ...pkg.dependencies };
+            
+            const cveFindings = await checkCVEs(dependencies);
             findings.push(...cveFindings);
-          }
-          
-          // Check for AI Hallucinated Packages
-          const hallucinatedFindings = await checkHallucinatedPackages(dependencies);
-          if (hallucinatedFindings.length > 0) {
-            scorePoints -= (hallucinatedFindings.length * 50); // Massive penalty for supply chain risks
+            
+            const hallucinatedFindings = await checkHallucinatedPackages(dependencies);
             findings.push(...hallucinatedFindings);
-          }
-        } catch (e) {}
+          } catch (e) {}
+        }
       }
     }
 
-    // Cleanup temp zip if local
-    if (localFilePath) fs.unlinkSync(localFilePath);
+    const uniqueFindings = [];
+    const seen = new Set();
+    findings.forEach(f => {
+      const key = `${f.title}-${f.file}-${f.lineNumber}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueFindings.push(f);
+      }
+    });
+
+    uniqueFindings.forEach(f => {
+      if (f.severity === 'CRITICAL') scorePoints -= 40;
+      else if (f.severity === 'HIGH') scorePoints -= 30;
+      else if (f.severity === 'MEDIUM') scorePoints -= 15;
+      else if (f.severity === 'LOW') scorePoints -= 5;
+    });
 
     let grade = 'A';
+    scorePoints = Math.max(0, scorePoints);
     if (scorePoints < 40) grade = 'F';
     else if (scorePoints < 60) grade = 'D';
     else if (scorePoints < 80) grade = 'C';
     else if (scorePoints < 90) grade = 'B';
 
+    if (localFilePath && fs.existsSync(localFilePath)) {
+      fs.unlinkSync(localFilePath);
+    }
+
     return {
       repo: `${owner}/${repo}`,
       grade,
-      score: Math.max(0, scorePoints),
-      findingsCount: findings.length,
-      findings
+      score: scorePoints,
+      findingsCount: uniqueFindings.length,
+      findings: uniqueFindings
     };
 
   } catch (error) {
-    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+    if (localFilePath && fs.existsSync(localFilePath)) {
+      fs.unlinkSync(localFilePath);
+    }
+    console.error('Fatal scan error:', error.message);
     throw new Error('Failed to process repository.');
   }
-}
-
-function translateToVibeLanguage(category, specificType) {
-  const translations = {
-    hardcodedSecrets: "Your API key is showing in the code. Anyone who sees this code can use your account, run up your bill, and cause immense personal liability.",
-    injectionRisks: `A user could type malicious code into your form and your app would run it (${specificType}). You must sanitize user inputs immediately.`,
-    accessGaps: "This page has no lock on the door (Wildcard CORS). Anyone can call your APIs directly from their own sketchy websites.",
-    insecureDefaults: `Your app is still in test mode (${specificType}). It is telling visitors far more about your internal system than it should.`,
-    aiRisks: `AI Cybersecurity Risk detected (${specificType}). Passing raw user inputs to LLMs can lead to Prompt Injection. Trusting outputs without a DLP filter can leak PII. Blindly uploading files can cause Training Poisoning, and missing rate limits can cause Unbounded Consumption.`
-  };
-  return translations[category] || "Security risk detected.";
 }

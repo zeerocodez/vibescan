@@ -40,6 +40,12 @@ model Finding {
   title          String
   description    String?
   filePath       String?
+  lineNumber     Int?
+  snippet        String?
+  fixSuggestion  String?
+  fixSnippet     String?
+  cweId          String?
+  cveId          String?
   scan           Scan      @relation(fields: [scanId], references: [id], onDelete: Cascade)
 }
 

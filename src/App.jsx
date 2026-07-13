@@ -197,6 +197,9 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
                 </div>
               )}
               <span className="hidden sm:inline text-[9px] font-bold font-mono tracking-wider text-primary/70">{user.email}</span>
+              <span className={`text-[8px] font-bold font-mono px-1.5 py-0.5 rounded border uppercase tracking-wider ${isPro ? 'bg-accent/20 text-accent border-accent/40' : 'bg-primary/10 text-primary/60 border-primary/20'}`}>
+                {isPro ? 'PRO' : 'FREE'}
+              </span>
               <button 
                 onClick={handleLogout}
                 className="hover:text-accent transition-colors text-primary/70 text-[9px] font-bold uppercase tracking-wider bg-primary/5 px-2.5 py-1.5 rounded-full border border-primary/10"
@@ -1563,8 +1566,20 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
       const formData = new FormData();
       formData.append('file', file);
       
+      const user = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('vibescan_user') || 'null');
+        } catch {
+          return null;
+        }
+      })();
+      const token = user ? (user.token || user.email) : '';
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/scan/upload', {
         method: 'POST',
+        headers,
         body: formData
       });
       
@@ -1609,9 +1624,20 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
     }
     
     try {
+      const user = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('vibescan_user') || 'null');
+        } catch {
+          return null;
+        }
+      })();
+      const token = user ? (user.token || user.email) : '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const response = await fetch('/api/scan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ url: sanitizedUrl })
       });
       
@@ -1703,12 +1729,24 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                           <h4 className="font-heading font-bold text-base text-accent flex items-center gap-2">
                             <AlertTriangle size={15} /> {finding.title}
                           </h4>
-                          <span className="font-data text-[9px] px-2.5 py-0.5 bg-accent/15 text-accent rounded-full uppercase font-bold">
-                            {finding.category}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {finding.severity && (
+                              <span className={`font-data text-[9px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                finding.severity === 'CRITICAL' ? 'bg-[#E63B2E] text-white' :
+                                finding.severity === 'HIGH' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+                                finding.severity === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
+                                'bg-blue-100 text-blue-700 border border-blue-200'
+                              }`}>
+                                {finding.severity}
+                              </span>
+                            )}
+                            <span className="font-data text-[9px] px-2.5 py-0.5 bg-accent/15 text-accent rounded-full uppercase font-bold">
+                              {finding.category}
+                            </span>
+                          </div>
                         </div>
                         <div className="font-data text-[10px] text-dark/50 mb-3 bg-dark/5 px-2 py-1 rounded inline-block">
-                          {finding.file}
+                          {finding.file || finding.filePath} {finding.lineNumber ? ` : Line ${finding.lineNumber}` : ''}
                         </div>
                         
                         <div className="relative">
@@ -1717,7 +1755,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                               <div className="flex items-center gap-2.5">
                                 <Lock size={14} className="text-accent shrink-0" />
                                 <span className="text-[10px] text-dark/70 leading-normal font-bold">
-                                  Audit details & remediation steps locked. Subscribe to Pro to unlock.
+                                  Vulnerability Remediation & Fix Steps Locked. Subscribe to Pro to unlock full security audit reports and actionable steps.
                                 </span>
                               </div>
                               <button 
@@ -1728,11 +1766,55 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                               </button>
                             </div>
                           ) : (
-                            <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl mt-2 space-y-2">
-                              <div className="text-xs font-bold text-dark/95 border-b border-dark/5 pb-1">Vulnerability Audit & Fix Steps:</div>
+                            <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl mt-2 space-y-3">
+                              <div className="text-xs font-bold text-dark/95 border-b border-dark/5 pb-1 flex justify-between items-center">
+                                <span>Vulnerability Audit & Fix Steps:</span>
+                                {finding.cweId && (
+                                  <span className="font-mono text-[9px] text-dark/40 font-bold bg-dark/5 px-1.5 py-0.5 rounded">
+                                    {finding.cweId}
+                                  </span>
+                                )}
+                              </div>
                               <p className="text-dark/80 text-[11px] leading-relaxed">
-                                {finding.message || "Exposed configuration variable could leak sensitive API calls. Re-configure environment variables and rebuild."}
+                                {finding.description || finding.message || "Exposed configuration variable could leak sensitive API calls. Re-configure environment variables and rebuild."}
                               </p>
+                              
+                              {finding.snippet && (
+                                <div className="mt-3">
+                                  <div className="text-[9px] font-mono text-dark/40 uppercase font-bold mb-1">Vulnerable Code Snippet:</div>
+                                  <div className="bg-dark text-white p-3 rounded-lg font-mono text-[10px] overflow-x-auto relative group/code select-all">
+                                    <code>{finding.snippet}</code>
+                                    <button 
+                                      onClick={() => navigator.clipboard.writeText(finding.snippet)}
+                                      className="absolute right-2 top-2 opacity-0 group-hover/code:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 text-white text-[8px] font-mono px-2 py-1 rounded border border-white/10 uppercase font-bold"
+                                    >
+                                      Copy
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {finding.fixSuggestion && (
+                                <div className="text-dark/80 text-[11px] leading-relaxed pt-1">
+                                  <span className="font-bold">💡 Fix Suggestion:</span> {finding.fixSuggestion}
+                                </div>
+                              )}
+
+                              {finding.fixSnippet && (
+                                <div className="mt-2">
+                                  <div className="text-[9px] font-mono text-dark/40 uppercase font-bold mb-1">Recommended Fix Patch:</div>
+                                  <div className="bg-green-950 text-green-200 p-3 rounded-lg font-mono text-[10px] overflow-x-auto relative group/fix select-all">
+                                    <code>{finding.fixSnippet}</code>
+                                    <button 
+                                      onClick={() => navigator.clipboard.writeText(finding.fixSnippet)}
+                                      className="absolute right-2 top-2 opacity-0 group-hover/fix:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 text-white text-[8px] font-mono px-2 py-1 rounded border border-white/10 uppercase font-bold"
+                                    >
+                                      Copy Fix
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
                               <div className="font-data text-[9px] text-green-600 flex items-center gap-1 font-bold pt-1">
                                 <Check size={12} /> Sandbox Mitigation Active
                               </div>

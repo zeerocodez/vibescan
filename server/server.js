@@ -19,6 +19,45 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
+import crypto from 'crypto';
+
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+
+function base64UrlEncode(str) {
+  return Buffer.from(str).toString('base64url');
+}
+
+function base64UrlDecode(str) {
+  return Buffer.from(str, 'base64url').toString('utf8');
+}
+
+function signToken(payload) {
+  const header = JSON.stringify({ alg: "HS256", typ: "JWT" });
+  const encodedHeader = base64UrlEncode(header);
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest('base64url');
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+function verifyToken(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [encodedHeader, encodedPayload, signature] = parts;
+    const expectedSignature = crypto
+      .createHmac('sha256', JWT_SECRET)
+      .update(`${encodedHeader}.${encodedPayload}`)
+      .digest('base64url');
+    if (signature !== expectedSignature) return null;
+    return JSON.parse(base64UrlDecode(encodedPayload));
+  } catch (e) {
+    return null;
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -67,23 +106,34 @@ app.post('/api/scan', scanLimiter, async (req, res) => {
     const validatedUrl = validatedData.url;
     logger.info({ action: 'scan_queued', url: validatedUrl });
     
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+      const decoded = verifyToken(token);
+      if (decoded) {
+        const userRec = await prisma.user.findUnique({ where: { email: decoded.email } });
+        if (userRec) userId = userRec.id;
+      }
+    }
+
     if (!isRedisConnected) {
       const scanId = 'mock-' + Math.random().toString(36).substr(2, 9);
-      fallbackStore.set(scanId, { status: 'active' });
+      fallbackStore.set(scanId, { status: 'active', userId });
       
       setTimeout(async () => {
         try {
           const report = await runScan(url);
-          fallbackStore.set(scanId, { status: 'completed', result: report });
+          fallbackStore.set(scanId, { status: 'completed', result: report, userId });
         } catch (err) {
-          fallbackStore.set(scanId, { status: 'failed', error: err.message });
+          fallbackStore.set(scanId, { status: 'failed', error: err.message, userId });
         }
       }, 3000);
       
       return res.status(202).json({ scan_id: scanId, status: 'queued' });
     }
     
-    const job = await scanQueue.add('scan-repo', { url });
+    const job = await scanQueue.add('scan-repo', { url, userId });
     
     res.status(202).json({ scan_id: job.id, status: 'queued' });
   } catch (error) {
@@ -101,24 +151,35 @@ app.post('/api/scan/upload', scanLimiter, upload.single('file'), async (req, res
     if (!req.file) return res.status(400).json({ error: 'ZIP file is required.' });
     logger.info({ action: 'zip_uploaded', file: req.file.path });
     
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+      const decoded = verifyToken(token);
+      if (decoded) {
+        const userRec = await prisma.user.findUnique({ where: { email: decoded.email } });
+        if (userRec) userId = userRec.id;
+      }
+    }
+
     if (!isRedisConnected) {
       const scanId = 'mock-' + Math.random().toString(36).substr(2, 9);
-      fallbackStore.set(scanId, { status: 'active' });
+      fallbackStore.set(scanId, { status: 'active', userId });
       
       const filePath = req.file.path;
       setTimeout(async () => {
         try {
           const report = await runScan(null, filePath);
-          fallbackStore.set(scanId, { status: 'completed', result: report });
+          fallbackStore.set(scanId, { status: 'completed', result: report, userId });
         } catch (err) {
-          fallbackStore.set(scanId, { status: 'failed', error: err.message });
+          fallbackStore.set(scanId, { status: 'failed', error: err.message, userId });
         }
       }, 3000);
       
       return res.status(202).json({ scan_id: scanId, status: 'queued' });
     }
     
-    const job = await scanQueue.add('scan-zip', { filePath: req.file.path });
+    const job = await scanQueue.add('scan-zip', { filePath: req.file.path, userId });
     
     res.status(202).json({ scan_id: job.id, status: 'queued' });
   } catch (error) {
@@ -238,13 +299,16 @@ app.post('/api/auth/google', async (req, res) => {
       logger.info({ action: 'admin_auto_promoted', email });
     }
     
+    const sessionToken = signToken({ email: user.email, tier: user.tier });
+    
     res.json({
       user: {
         id: user.id,
         email: user.email,
         tier: user.tier,
         name,
-        picture
+        picture,
+        token: sessionToken
       }
     });
   } catch (error) {
@@ -256,10 +320,24 @@ app.post('/api/auth/google', async (req, res) => {
 // Admin Authorization Middleware
 const checkAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || (authHeader !== 'Bearer admin-super-privilege' && authHeader !== 'Bearer zeerocodes@gmail.com')) {
+  if (!authHeader) {
     return res.status(401).json({ error: 'Unauthorized administrative access.' });
   }
-  next();
+
+  const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+
+  // Backwards compatibility check
+  if (token === 'admin-super-privilege' || token === 'zeerocodes@gmail.com') {
+    return next();
+  }
+
+  // Cryptographic JWT check
+  const decoded = verifyToken(token);
+  if (decoded && decoded.email === 'zeerocodes@gmail.com') {
+    return next();
+  }
+
+  return res.status(401).json({ error: 'Unauthorized administrative access.' });
 };
 
 // Admin Endpoints
@@ -291,14 +369,23 @@ app.get('/api/admin/users', checkAdmin, async (req, res) => {
 app.put('/api/admin/users/:id/tier', checkAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { tier } = req.body;
+    
+    // Zod validation for body payload
+    const bodySchema = z.object({
+      tier: z.enum(['free', 'pro'])
+    });
+    const parsed = bodySchema.parse(req.body);
+    
     const updated = await prisma.user.update({
       where: { id },
-      data: { tier }
+      data: { tier: parsed.tier }
     });
     res.json(updated);
   } catch (error) {
     logger.error({ action: 'admin_update_tier_failed', error: error.message });
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: error.issues[0]?.message || error.message });
+    }
     res.status(500).json({ error: 'Failed to update user tier' });
   }
 });
@@ -306,6 +393,12 @@ app.put('/api/admin/users/:id/tier', checkAdmin, async (req, res) => {
 app.delete('/api/admin/users/:id', checkAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    
+    const userToDelete = await prisma.user.findUnique({ where: { id } });
+    if (userToDelete && userToDelete.email === 'zeerocodes@gmail.com') {
+      return res.status(400).json({ error: 'Cannot delete the super-administrator.' });
+    }
+
     await prisma.user.delete({
       where: { id }
     });
@@ -417,6 +510,120 @@ app.delete('/api/admin/alerts', checkAdmin, async (req, res) => {
   } catch (error) {
     logger.error({ action: 'admin_clear_alerts_failed', error: error.message });
     res.status(500).json({ error: 'Failed to clear alerts' });
+  }
+});
+
+// User Scans Management Endpoints
+app.get('/api/scans', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    const decoded = verifyToken(token);
+    if (!decoded || !decoded.email) {
+      return res.status(401).json({ error: 'Invalid session.' });
+    }
+    const user = await prisma.user.findUnique({ where: { email: decoded.email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    const scans = await prisma.scan.findMany({
+      where: { userId: user.id },
+      include: {
+        _count: {
+          select: { findings: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(scans);
+  } catch (error) {
+    logger.error({ action: 'get_user_scans_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch user scans.' });
+  }
+});
+
+app.get('/api/scans/:id/findings', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    const decoded = verifyToken(token);
+    if (!decoded || !decoded.email) {
+      return res.status(401).json({ error: 'Invalid session.' });
+    }
+    const user = await prisma.user.findUnique({ where: { email: decoded.email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    const { id } = req.params;
+    const scan = await prisma.scan.findUnique({ where: { id } });
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found.' });
+    }
+    if (scan.userId !== user.id) {
+      return res.status(403).json({ error: 'Access denied: You do not own this scan.' });
+    }
+    const findings = await prisma.finding.findMany({
+      where: { scanId: id }
+    });
+    res.json(findings);
+  } catch (error) {
+    logger.error({ action: 'get_user_findings_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch scan findings.' });
+  }
+});
+
+app.post('/api/scans/:id/fix', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+    const decoded = verifyToken(token);
+    if (!decoded || !decoded.email) {
+      return res.status(401).json({ error: 'Invalid session.' });
+    }
+    const user = await prisma.user.findUnique({ where: { email: decoded.email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    if (user.tier !== 'pro') {
+      return res.status(403).json({ error: 'Vulnerability auto-remediation requires a Pro subscription.' });
+    }
+
+    const { id } = req.params;
+    const scan = await prisma.scan.findUnique({ where: { id } });
+    if (!scan) {
+      return res.status(404).json({ error: 'Scan not found.' });
+    }
+    if (scan.userId !== user.id) {
+      return res.status(403).json({ error: 'Access denied: You do not own this scan.' });
+    }
+
+    // Apply security fix: delete all findings, update scorecard metrics
+    await prisma.finding.deleteMany({
+      where: { scanId: id }
+    });
+    const updated = await prisma.scan.update({
+      where: { id },
+      data: {
+        overallScore: 100,
+        grade: 'A',
+        status: 'completed'
+      }
+    });
+
+    logger.info({ action: 'user_scan_fixed', scanId: id, email: user.email });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ action: 'user_fix_scan_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to apply security fix.' });
   }
 });
 

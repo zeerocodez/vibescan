@@ -383,6 +383,50 @@ export default function AdminDashboard() {
     }
   }, [token, activeTab, loading]);
 
+  if (user && user.email !== 'zeerocodes@gmail.com') {
+    return (
+      <div className="min-h-screen bg-[#E8E4DD] text-[#111111] font-data flex flex-col justify-center items-center px-6 selection:bg-[#E63B2E] selection:text-[#F5F3EE]">
+        <svg className="hidden">
+          <filter id="noise">
+            <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
+          </filter>
+        </svg>
+        <div className="fixed inset-0 opacity-5 pointer-events-none z-50" style={{ filter: 'url(#noise)' }}></div>
+
+        <div className="w-full max-w-md bg-[#F5F3EE] border-2 border-dark rounded-[2.5rem] p-8 md:p-10 shadow-[8px_8px_0px_#111111] flex flex-col relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-[#E63B2E] translate-x-12 -translate-y-12 rotate-45" />
+          
+          <header className="mb-8 flex items-center gap-3">
+            <div className="bg-[#E63B2E] p-2 rounded-xl text-white">
+              <Shield size={20} />
+            </div>
+            <div>
+              <h1 className="font-heading font-bold text-lg uppercase tracking-tight leading-none">Access Denied</h1>
+              <span className="text-[9px] font-bold text-[#E63B2E] tracking-widest uppercase">System Control</span>
+            </div>
+          </header>
+
+          <p className="text-[11px] text-dark/70 leading-relaxed mb-6">
+            Access to this console is restricted to the admin email <strong className="text-dark font-bold font-mono">zeerocodes@gmail.com</strong>. You are currently logged in as <strong className="text-dark font-bold font-mono">{user.email}</strong>.
+          </p>
+
+          <div className="flex gap-4">
+            <button 
+              onClick={handleLogout}
+              className="w-full bg-dark text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 border border-dark"
+            >
+              Sign Out / Switch Account
+            </button>
+          </div>
+
+          <Link to="/" className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#E63B2E] hover:underline mt-6 self-start">
+            <ArrowLeft size={10} /> Back to Homepage
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <div className="min-h-screen bg-[#E8E4DD] text-[#111111] font-data flex flex-col justify-center items-center px-6 selection:bg-[#E63B2E] selection:text-[#F5F3EE]">
@@ -499,7 +543,7 @@ export default function AdminDashboard() {
                   : 'text-dark/50 hover:text-dark'
               }`}
             >
-              {tab}
+              {tab === 'audits' ? 'Audits & Control' : tab}
             </button>
           ))}
         </div>
