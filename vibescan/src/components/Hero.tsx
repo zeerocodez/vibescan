@@ -17,7 +17,7 @@ export default function Hero() {
     },
     {
       title: 'OWASP Top 10',
-      desc: 'Static analysis for XSS (innerHTML), SQL injections, unsafe eval() loops, and exposed debug flags.',
+      desc: 'Static analysis for XSS (innerHTML), SQL injections, unsafe evaluation functions, and exposed debug flags.',
       icon: AlertOctagon,
       color: 'text-[#ffc107] hover:border-[#ffc107]/30',
     },

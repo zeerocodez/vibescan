@@ -48,7 +48,7 @@ Analyze the following files from the project "${repoName}" for security concerns
 Identify items in these 5 categories:
 1. "secrets": Hardcoded API keys (OpenAI 'sk-', AWS, Stripe, Slack webhooks, JWT tokens, Private Keys, DB URLs with passwords, committed .env files). CRITICAL/HIGH severity.
 2. "dependencies": Vulnerable or insecure package.json dependencies (flag versions with '^0.x' or '~0.x', unmaintained, or clearly vulnerable packages).
-3. "owasp": OWASP risks (eval() usages, SQL string concatenations, DEBUG = True, verify=False, innerHTML usage without sanitization).
+3. "owasp": OWASP risks (evaluation functions, SQL string concatenations, debug mode checks, verify=False, innerHTML usage without sanitization).
 4. "hallucinate": Hallucinated packages in package.json or requirements.txt (packages that don't exist, typos of popular packages, suspicious packages).
 5. "smell": Code quality and security smells (document.write, hardcoded IPs/domains, TODO comments about security / auth / passwords).
 

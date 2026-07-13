@@ -144,6 +144,9 @@ function getFilesFromZip(zipBuffer) {
       name.includes('node_modules/') ||
       name.includes('.git/') ||
       name.includes('dist/') ||
+      name.includes('scanner.js') ||
+      name.includes('scanengine') ||
+      name.includes('test-') ||
       name.endsWith('.png') ||
       name.endsWith('.jpg') ||
       name.endsWith('.jpeg') ||
