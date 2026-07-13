@@ -92,8 +92,17 @@ const MagneticButton = ({ children, className, onClick, variant = 'primary', siz
 };
 
 export default function AdminDashboard() {
-  const [token, setToken] = useState(localStorage.getItem('vibescan_admin_token') || '');
-  const [inputKey, setInputKey] = useState('');
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('vibescan_user') || 'null');
+    } catch {
+      return null;
+    }
+  });
+  
+  const [token, setToken] = useState(() => {
+    return user && user.email === 'zeerocodes@gmail.com' ? user.email : '';
+  });
   const [error, setError] = useState('');
   
   // Dashboard state
@@ -102,7 +111,7 @@ export default function AdminDashboard() {
   const [scans, setScans] = useState([]);
   const [alerts, setAlerts] = useState([]);
   
-  // Selected tab: 'overview' | 'users' | 'scans' | 'telemetry'
+  // Selected tab: 'overview' | 'users' | 'scans' | 'telemetry' | 'audits'
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(false);
   
@@ -112,24 +121,61 @@ export default function AdminDashboard() {
   
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-  // Handle Login / Privilege Check
-  const handleLogin = (keyToUse) => {
-    const key = keyToUse || inputKey;
-    if (key.trim() === 'admin-super-privilege') {
-      localStorage.setItem('vibescan_admin_token', key);
-      setToken(key);
-      setError('');
-    } else {
-      setError('Invalid Administrative Key. Please try again or use the bypass button.');
+  const handleCredentialResponse = async (response) => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user.email === 'zeerocodes@gmail.com') {
+          localStorage.setItem('vibescan_user', JSON.stringify(data.user));
+          localStorage.setItem('vibescan_pro_active', 'true');
+          setUser(data.user);
+          setToken(data.user.email);
+          setError('');
+        } else {
+          setError('Access Denied: Administrative panel is restricted to zeerocodes@gmail.com.');
+        }
+      }
+    } catch (e) {
+      console.error("Google login failed", e);
     }
   };
 
-  const handleBypass = () => {
-    handleLogin('admin-super-privilege');
+  useEffect(() => {
+    if (!token && window.google) {
+      window.google.accounts.id.initialize({
+        client_id: "87459345261-mockclientid.apps.googleusercontent.com",
+        callback: handleCredentialResponse
+      });
+      const btnEl = document.getElementById("admin-google-signin-btn");
+      if (btnEl) {
+        window.google.accounts.id.renderButton(
+          btnEl,
+          { theme: "filled_black", size: "large", shape: "pill" }
+        );
+      }
+    }
+  }, [token]);
+
+  const handleDevLogin = async () => {
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+    const payload = btoa(JSON.stringify({
+      email: "zeerocodes@gmail.com",
+      name: "Zeero Codes Admin",
+      picture: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120"
+    }));
+    const mockToken = `${header}.${payload}.signature`;
+    await handleCredentialResponse({ credential: mockToken });
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('vibescan_admin_token');
+    localStorage.removeItem('vibescan_user');
+    localStorage.removeItem('vibescan_pro_active');
+    setUser(null);
     setToken('');
     setUsers([]);
     setScans([]);
@@ -265,6 +311,22 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleFixScan = async (scanId) => {
+    if (!confirm("Are you sure you want to run a full security fix on this scan? This will automatically patch all vulnerabilities and upgrade its score to 100.")) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/scans/${scanId}/fix`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchScans();
+        fetchStats();
+      }
+    } catch (e) {
+      alert("Failed to run scan security fix.");
+    }
+  };
+
   const handleViewFindings = async (scanId) => {
     setViewingScanId(scanId);
     try {
@@ -348,27 +410,13 @@ export default function AdminDashboard() {
           <div className="mb-6">
             <div className="flex items-center gap-2 text-dark/60 text-xs mb-4">
               <Lock size={12} className="text-[#E63B2E]" />
-              <span>Administrative Privilege Check Required</span>
+              <span>Administrative Privilege Required</span>
             </div>
             <p className="text-[11px] text-dark/70 leading-relaxed mb-6">
-              Access to this console requires validation. Enter your super-user credentials or trigger the bypass button to obtain full administrative privileges immediately.
+              Access to this console is restricted to the admin email <strong className="text-dark font-bold font-mono">zeerocodes@gmail.com</strong>. Authenticate via Google Sign-In to unlock.
             </p>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-dark/50 mb-2">Security Master Key</label>
-                <div className="relative">
-                  <input 
-                    type="password"
-                    value={inputKey}
-                    onChange={(e) => setInputKey(e.target.value)}
-                    placeholder="Enter admin key..." 
-                    className="w-full bg-[#E8E4DD] border-2 border-dark rounded-xl px-4 py-3 font-data text-xs text-dark placeholder:text-dark/30 focus:outline-none focus:border-[#E63B2E]"
-                  />
-                  <Key size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-dark/30" />
-                </div>
-              </div>
-
               {error && (
                 <div className="text-[10px] text-[#E63B2E] bg-[#E63B2E]/5 border border-[#E63B2E]/20 p-2.5 rounded-lg font-bold flex gap-2">
                   <AlertCircle size={12} className="shrink-0" />
@@ -376,26 +424,19 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              <button 
-                type="button"
-                className="w-full bg-[#E63B2E] text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 border border-dark"
-                onClick={() => handleLogin()}
-              >
-                Log In
-              </button>
+              <div className="flex flex-col items-center justify-center p-4 bg-dark/5 rounded-2xl border-2 border-dark/10">
+                <div id="admin-google-signin-btn" className="my-2" />
+              </div>
 
-              <div className="border-t border-dark/10 my-4 pt-4">
+              <div className="border-t border-dark/10 my-2 pt-2">
                 <button 
                   type="button" 
-                  onClick={handleBypass}
+                  onClick={handleDevLogin}
                   className="w-full bg-dark text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 border border-dark"
                 >
                   <Key size={12} />
-                  Bypass & Grant Full Privilege
+                  Dev Bypass: Sign in as zeerocodes@gmail.com
                 </button>
-                <div className="text-center text-[9px] text-dark/40 mt-2 font-mono">
-                  Default Key: admin-super-privilege
-                </div>
               </div>
             </div>
           </div>
@@ -448,7 +489,7 @@ export default function AdminDashboard() {
 
         {/* Tab Navigation */}
         <div className="flex border-b border-dark/10 mb-8 overflow-x-auto gap-2">
-          {['overview', 'users', 'scans', 'telemetry'].map((tab) => (
+          {['overview', 'users', 'scans', 'telemetry', 'audits'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -657,6 +698,15 @@ export default function AdminDashboard() {
                           >
                             <Eye size={12} />
                           </button>
+                          {scan.status === 'completed' && (scan._count?.findings ?? 0) > 0 && (
+                            <button
+                              onClick={() => handleFixScan(scan.id)}
+                              className="bg-green-600/10 hover:bg-green-600 hover:text-white border border-green-600/20 text-green-600 rounded px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest font-mono transition-colors"
+                              title="Run Full Security Fix"
+                            >
+                              Run Fix
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDeleteScan(scan.id)}
                             className="bg-[#E63B2E]/10 hover:bg-[#E63B2E] hover:text-white border border-[#E63B2E]/20 text-[#E63B2E] rounded p-1 transition-colors"
@@ -730,6 +780,86 @@ export default function AdminDashboard() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'audits' && (
+          <div className="space-y-8">
+            <div className="admin-card bg-[#F5F3EE] border-2 border-dark rounded-[2.5rem] p-8 shadow-[6px_6px_0px_#111111]">
+              <h3 className="font-heading font-bold text-lg uppercase mb-4 border-b border-dark/10 pb-4 text-[#E63B2E]">Run Vibe Codebase Audit</h3>
+              <p className="font-data text-xs text-dark/70 mb-6 leading-relaxed font-mono">// PLATFORM SCAN SIMULATION</p>
+              
+              <div className="space-y-4 max-w-xl">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-dark/50 mb-2">Target Codebase URL</label>
+                  <input 
+                    type="text" 
+                    id="admin-audit-url"
+                    placeholder="https://github.com/username/project"
+                    className="w-full bg-[#E8E4DD] border-2 border-dark rounded-xl px-4 py-3 font-data text-xs text-dark placeholder:text-dark/30 focus:outline-none focus:border-[#E63B2E]"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    const urlVal = document.getElementById('admin-audit-url').value;
+                    if (!urlVal) return alert('Please enter a target URL');
+                    try {
+                      const res = await fetch(`${API_URL}/api/scan`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: urlVal })
+                      });
+                      if (res.ok) {
+                        alert('Vibe Audit queued successfully!');
+                        document.getElementById('admin-audit-url').value = '';
+                        fetchScans();
+                        fetchStats();
+                      } else {
+                        const data = await res.json();
+                        alert(data.error || 'Failed to queue audit');
+                      }
+                    } catch (e) {
+                      alert('Connection to server failed.');
+                    }
+                  }}
+                  className="bg-[#E63B2E] text-white hover:bg-black transition-colors rounded-xl px-6 py-3 text-[10px] font-bold uppercase tracking-widest font-mono border border-dark"
+                >
+                  Trigger Admin Vibe Audit
+                </button>
+              </div>
+            </div>
+
+            <div className="admin-card bg-[#F5F3EE] border-2 border-dark rounded-[2.5rem] p-8 shadow-[6px_6px_0px_#111111]">
+              <h3 className="font-heading font-bold text-lg uppercase mb-4 border-b border-dark/10 pb-4 text-green-700">Apply Global Security Fix</h3>
+              <p className="font-data text-xs text-dark/70 mb-6 leading-relaxed">
+                Runs an automated code mitigation sweep. This will scan the entire database, locate all unresolved security exposures across all projects, and apply automated code patches—raising overall scan scores to 100% (Grade A) and clearing findings list.
+              </p>
+              <button
+                onClick={async () => {
+                  if (!confirm("Are you sure you want to run a global security fix across all codebase logs? This will patch all findings instantly.")) return;
+                  try {
+                    let fixedCount = 0;
+                    for (const scan of scans) {
+                      if (scan.status === 'completed' && (scan._count?.findings > 0)) {
+                        const res = await fetch(`${API_URL}/api/admin/scans/${scan.id}/fix`, {
+                          method: 'POST',
+                          headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (res.ok) fixedCount++;
+                      }
+                    }
+                    alert(`Global Vibe Fix executed successfully! Patched ${fixedCount} codebase scans.`);
+                    fetchScans();
+                    fetchStats();
+                  } catch (e) {
+                    alert('Failed to execute global patch.');
+                  }
+                }}
+                className="bg-green-700 text-white hover:bg-black transition-colors rounded-xl px-6 py-3 text-[10px] font-bold uppercase tracking-widest font-mono border border-dark"
+              >
+                Execute Global Security Fixes
+              </button>
             </div>
           </div>
         )}

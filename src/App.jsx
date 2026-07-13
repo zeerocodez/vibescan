@@ -105,7 +105,64 @@ const MagneticButton = ({ children, className, onClick, variant = 'primary', siz
 };
 
 // --- Navbar Component ---
-const Navbar = ({ onOpenScanner, onOpenCheckout, isPro }) => {
+const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
+  const navigate = useNavigate();
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+  const handleCredentialResponse = async (response) => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('vibescan_user', JSON.stringify(data.user));
+        setUser(data.user);
+        if (data.user.tier === 'pro') {
+          localStorage.setItem('vibescan_pro_active', 'true');
+        }
+      }
+    } catch (e) {
+      console.error("Google login failed", e);
+    }
+  };
+
+  useEffect(() => {
+    if (!user && window.google) {
+      window.google.accounts.id.initialize({
+        client_id: "87459345261-mockclientid.apps.googleusercontent.com",
+        callback: handleCredentialResponse
+      });
+      const btnEl = document.getElementById("google-signin-btn");
+      if (btnEl) {
+        window.google.accounts.id.renderButton(
+          btnEl,
+          { theme: "filled_black", size: "small", shape: "pill" }
+        );
+      }
+    }
+  }, [user]);
+
+  const handleDevLogin = async () => {
+    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+    const payload = btoa(JSON.stringify({
+      email: "zeerocodes@gmail.com",
+      name: "Zeero Codes Admin",
+      picture: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120"
+    }));
+    const mockToken = `${header}.${payload}.signature`;
+    await handleCredentialResponse({ credential: mockToken });
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('vibescan_user');
+    localStorage.removeItem('vibescan_pro_active');
+    setUser(null);
+    navigate('/');
+  };
+
   return (
     <nav className="absolute top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-6xl rounded-[2rem] border border-primary/15 bg-[#111111]/45 backdrop-blur-md text-primary">
       <div className="flex items-center justify-between px-6 py-3 gap-4">
@@ -117,37 +174,48 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro }) => {
           )}
         </div>
         
-        <div className="hidden lg:flex gap-6 text-[10px] font-data font-bold tracking-widest uppercase items-center shrink-0">
+        <div className="hidden lg:flex gap-5 text-[10px] font-data font-bold tracking-widest uppercase items-center shrink-0">
           <a href="#vulnerabilities" className="hover:text-accent transition-colors text-primary/80">Risks</a>
           <a href="#features" className="hover:text-accent transition-colors text-primary/80">Suite</a>
           <a href="#protocol" className="hover:text-accent transition-colors text-primary/80">Steps</a>
           <a href="#pricing" className="hover:text-accent transition-colors text-primary/80">Pricing</a>
           <a href="#faq" className="hover:text-accent transition-colors text-primary/80">FAQ</a>
           <Link to="/dashboard" className="hover:text-accent transition-colors text-primary/80">Dashboard</Link>
-          <Link to="/admin" className="hover:text-accent transition-colors text-[#E63B2E] font-bold">Admin</Link>
+          {user && user.email === 'zeerocodes@gmail.com' && (
+            <Link to="/admin" className="hover:text-accent transition-colors text-[#E63B2E] font-bold">Admin</Link>
+          )}
         </div>
         
         <div className="flex items-center gap-3 shrink-0">
-          {!isPro ? (
-            <MagneticButton 
-              variant="outline" 
-              size="sm"
-              className="border-primary text-primary hover:border-accent" 
-              onClick={onOpenCheckout}
-            >
-              Subscribe to Pro
-            </MagneticButton>
-          ) : (
-            <Link to="/dashboard">
-              <MagneticButton 
-                variant="outline" 
-                size="sm"
-                className="border-primary text-primary"
+          {user ? (
+            <div className="flex items-center gap-3">
+              {user.picture ? (
+                <img src={user.picture} alt="Avatar" className="w-6 h-6 rounded-full border border-primary/20" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-accent/30 text-accent text-[9px] font-bold flex items-center justify-center font-mono">
+                  {user.email[0].toUpperCase()}
+                </div>
+              )}
+              <span className="hidden sm:inline text-[9px] font-bold font-mono tracking-wider text-primary/70">{user.email}</span>
+              <button 
+                onClick={handleLogout}
+                className="hover:text-accent transition-colors text-primary/70 text-[9px] font-bold uppercase tracking-wider bg-primary/5 px-2.5 py-1.5 rounded-full border border-primary/10"
               >
-                Telemetry Logs
-              </MagneticButton>
-            </Link>
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div id="google-signin-btn" className="scale-[0.85] origin-right" />
+              <button
+                onClick={handleDevLogin}
+                className="hover:text-accent transition-colors text-primary/80 border border-primary/20 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
+              >
+                Dev Login
+              </button>
+            </div>
           )}
+          
           <MagneticButton 
             variant="primary" 
             size="sm" 
@@ -1628,7 +1696,7 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
             <div className="relative space-y-4 max-h-[45vh] overflow-y-auto pr-2 custom-scrollbar">
               {results.findings && results.findings.length > 0 ? (
                 <>
-                  <div className="space-y-4 mb-28">
+                  <div className="space-y-4 mb-10">
                     {results.findings.map((finding, idx) => (
                       <div key={idx} className="bg-[#F5F3EE] p-5 rounded-2xl shadow-sm border border-dark/10 relative overflow-hidden">
                         <div className="flex justify-between items-start mb-3">
@@ -1645,25 +1713,27 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                         
                         <div className="relative">
                           {!isPro ? (
-                            <>
-                              <p className="text-dark/80 blur-sm select-none pointer-events-none text-xs">
-                                This vulnerability allows remote code execution or data exfiltration. Remediation involves patching imports to verify registries.
-                              </p>
-                              <div className="absolute inset-0 flex items-center justify-center bg-white/20">
-                                <button 
-                                  onClick={() => { onClose(); setTimeout(onOpenCheckout, 100); }}
-                                  className="bg-dark hover:bg-accent text-primary font-data text-[9px] uppercase px-3.5 py-1.5 rounded-full flex items-center gap-2 border border-accent/20 transition-colors shadow-lg"
-                                >
-                                  <Lock size={10} className="text-accent" /> Remediation locked - Upgrade to Pro
-                                </button>
+                            <div className="bg-dark/5 border border-dark/10 p-3.5 rounded-xl flex items-center justify-between gap-4 mt-2">
+                              <div className="flex items-center gap-2.5">
+                                <Lock size={14} className="text-accent shrink-0" />
+                                <span className="text-[10px] text-dark/70 leading-normal font-bold">
+                                  Audit details & remediation steps locked. Subscribe to Pro to unlock.
+                                </span>
                               </div>
-                            </>
+                              <button 
+                                onClick={() => { onClose(); setTimeout(onOpenCheckout, 100); }}
+                                className="bg-accent text-[#F5F3EE] hover:bg-dark hover:text-white transition-colors text-[9px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg border border-dark shrink-0 whitespace-nowrap"
+                              >
+                                Get Pro
+                              </button>
+                            </div>
                           ) : (
-                            <div className="bg-green-500/5 border border-green-500/20 p-3 rounded-lg">
-                              <p className="text-dark/80 text-xs leading-relaxed">
-                                {finding.message || "Dependency hallucination verified. Sandbox module has actively scrubbed and isolated this import."}
+                            <div className="bg-green-500/5 border border-green-500/20 p-4 rounded-xl mt-2 space-y-2">
+                              <div className="text-xs font-bold text-dark/95 border-b border-dark/5 pb-1">Vulnerability Audit & Fix Steps:</div>
+                              <p className="text-dark/80 text-[11px] leading-relaxed">
+                                {finding.message || "Exposed configuration variable could leak sensitive API calls. Re-configure environment variables and rebuild."}
                               </p>
-                              <div className="font-data text-[9px] text-green-600 mt-2 flex items-center gap-1 font-bold">
+                              <div className="font-data text-[9px] text-green-600 flex items-center gap-1 font-bold pt-1">
                                 <Check size={12} /> Sandbox Mitigation Active
                               </div>
                             </div>
@@ -1672,26 +1742,6 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
                       </div>
                     ))}
                   </div>
-                  
-                  {!isPro && (
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#E8E4DD] via-[#E8E4DD]/95 to-transparent pt-16 pb-2 px-1">
-                      <div className="bg-dark text-primary p-5 rounded-2xl shadow-[0_0_30px_rgba(230,59,46,0.25)] border-2 border-accent relative text-center">
-                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-accent text-background font-heading font-bold uppercase tracking-widest text-[9px] px-3.5 py-1 rounded-full whitespace-nowrap">
-                          CRITICAL ACTION REQUIRED
-                        </div>
-                        <h4 className="font-heading font-bold text-xl mb-1 text-white">Your app is vulnerable.</h4>
-                        <p className="font-data text-[9px] text-primary/70 mb-4 max-w-md mx-auto">
-                          Unlock 1-click remediation scripts and run the AgentGuard Sandbox package to block shell command injections.
-                        </p>
-                        <button 
-                          onClick={() => { onClose(); setTimeout(onOpenCheckout, 100); }}
-                          className="w-full bg-accent text-white px-6 py-3 rounded-xl font-heading font-bold text-xs uppercase tracking-wider hover:scale-[1.02] transition-transform shadow-[0_0_15px_rgba(230,59,46,0.3)]"
-                        >
-                          Upgrade to Pro - $79/mo
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </>
               ) : (
                 <div className="text-center py-12">
@@ -1834,18 +1884,33 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout }) => {
 const Home = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('vibescan_user') || 'null');
+    } catch {
+      return null;
+    }
+  });
   const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
     const savedPro = localStorage.getItem('vibescan_pro_active');
-    if (savedPro === 'true') {
+    if (savedPro === 'true' || (user && user.tier === 'pro')) {
       setIsPro(true);
+    } else {
+      setIsPro(false);
     }
-  }, []);
+  }, [user]);
 
   const handleSubscribeSuccess = () => {
     setIsPro(true);
     localStorage.setItem('vibescan_pro_active', 'true');
+    // Also update backend user tier if logged in
+    if (user) {
+      const updatedUser = { ...user, tier: 'pro' };
+      localStorage.setItem('vibescan_user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+    }
   };
 
   return (
@@ -1861,6 +1926,8 @@ const Home = () => {
         onOpenScanner={() => setIsScannerOpen(true)} 
         onOpenCheckout={() => setIsCheckoutOpen(true)}
         isPro={isPro}
+        user={user}
+        setUser={setUser}
       />
       
       <main>
