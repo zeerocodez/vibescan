@@ -626,8 +626,36 @@ app.post('/api/scans/:id/fix', async (req, res) => {
             }
           }
         }
+
+        // Bundle upgraded Vibe Guard (agentguard.js) inside the remediated project archive
+        if (fs.existsSync('packages/agentguard/index.js')) {
+          const guardSource = fs.readFileSync('packages/agentguard/index.js', 'utf8');
+          zip.addFile('agentguard.js', Buffer.from(guardSource, 'utf8'));
+          logger.info({ action: 'agentguard_bundled_to_zip', scanId: id });
+
+          // Scan for entrypoint configuration files to prepend the runtime firewall hook
+          const entrypointList = ['server.js', 'index.js', 'app.js', 'server.ts', 'index.ts'];
+          for (const filename of entrypointList) {
+            const entry = zip.getEntry(filename);
+            if (entry) {
+              let content = entry.getData().toString('utf8');
+              if (!content.includes('initAgentGuard')) {
+                const isESM = content.includes('import ') || content.includes('export ');
+                const injection = isESM
+                  ? `import { initAgentGuard } from './agentguard.js';\ninitAgentGuard({ mode: 'block' });\n`
+                  : `const { initAgentGuard } = require('./agentguard.js');\ninitAgentGuard({ mode: 'block' });\n`;
+                
+                content = injection + content;
+                zip.updateFile(filename, Buffer.from(content, 'utf8'));
+                logger.info({ action: 'agentguard_injected_to_entrypoint', scanId: id, entrypoint: filename });
+              }
+              break;
+            }
+          }
+        }
+
         zip.writeZip(scan.localFilePath);
-        logger.info({ action: 'local_zip_remediated', scanId: id });
+        logger.info({ action: 'local_zip_remediated_and_guarded', scanId: id });
       } catch (err) {
         logger.error({ action: 'zip_remediation_failed', error: err.message });
       }
