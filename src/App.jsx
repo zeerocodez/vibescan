@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import CertPage from './CertPage';
 import Dashboard from './Dashboard';
+import AdminDashboard from './AdminDashboard';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -123,6 +124,7 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro }) => {
           <a href="#pricing" className="hover:text-accent transition-colors text-primary/80">Pricing</a>
           <a href="#faq" className="hover:text-accent transition-colors text-primary/80">FAQ</a>
           <Link to="/dashboard" className="hover:text-accent transition-colors text-primary/80">Dashboard</Link>
+          <Link to="/admin" className="hover:text-accent transition-colors text-[#E63B2E] font-bold">Admin</Link>
         </div>
         
         <div className="flex items-center gap-3 shrink-0">
@@ -359,6 +361,105 @@ const VulnerabilityMatrix = () => {
               A recent vibe-coded app with zero security review was compromised, exposing <span className="text-accent font-bold">1.5 million API keys in three days</span>. That could be you. Don't launch without verification.
             </p>
           </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
+// --- Core Capabilities and System Architecture Section ---
+const Capabilities = () => {
+  const container = useRef(null);
+
+  useEffect(() => {
+    const ctx = gsap.context(() => {
+      gsap.fromTo('.capability-card', 
+        { y: 30, opacity: 0 },
+        {
+          scrollTrigger: {
+            trigger: container.current,
+            start: 'top 80%',
+            toggleActions: 'play none none none'
+          },
+          y: 0,
+          opacity: 1,
+          duration: 0.6,
+          stagger: 0.1,
+          ease: 'power2.out'
+        }
+      );
+    }, container);
+    return () => ctx.revert();
+  }, []);
+
+  const capabilities = [
+    {
+      title: "VibeAudit: Vulnerability Scanner",
+      points: [
+        "Automated Static Application Security Testing (SAST) for JS/TS codebases",
+        "Scans for 20+ vulnerability classifications including SQLi, XSS, and broken auth",
+        "Scrubs hardcoded API keys, Stripe tokens, and database connection strings",
+        "Audits npm lockfiles for known CVEs and outdated package vulnerabilities"
+      ],
+      icon: <Terminal className="text-accent" size={24} />
+    },
+    {
+      title: "VibeGuard: Live Threat Shield",
+      points: [
+        "Monkey-patched child_process execution wrapping to contain malicious code runs",
+        "Real-time interceptor blocking rogue autonomous agents from destructive system commands",
+        "Output scrubbing to redact PII (API keys, SSNs, phone numbers) before LLM egress",
+        "Live security logging and instant threat telemetry feed back to your dashboard"
+      ],
+      icon: <Activity className="text-accent" size={24} />
+    },
+    {
+      title: "VibeCert: Security Badges",
+      points: [
+        "Dynamic, secure SVG status badges that update in real time based on recent scans",
+        "Signed PDF compliance certificates matching SOC 2 and GDPR controls",
+        "Shareable investor-ready and customer-facing security verification pages",
+        "Immutable audit trial proof to verify your application's continuous deployment safety"
+      ],
+      icon: <Shield className="text-accent" size={24} />
+    }
+  ];
+
+  return (
+    <section ref={container} id="capabilities" className="py-28 px-6 bg-[#F5F3EE] border-t border-dark/10">
+      <div className="max-w-7xl mx-auto">
+        <header className="mb-20 max-w-3xl">
+          <div className="font-data text-accent text-xs uppercase tracking-widest font-bold mb-4">// PLATFORM CAPABILITIES</div>
+          <h2 className="font-heading font-bold text-4xl md:text-6xl uppercase tracking-tighter leading-none">
+            Secure your velocity. <br/>
+            <span className="font-drama italic text-dark/60 normal-case">Enterprise-grade safety.</span>
+          </h2>
+          <p className="font-data text-xs text-dark/70 mt-6 leading-relaxed">
+            AI code assistants help you write applications at lightspeed. VibeScan ensures you don't compromise on security. Here are the core capabilities keeping your codebase and runtime safe.
+          </p>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {capabilities.map((cap, i) => (
+            <div key={i} className="capability-card bg-background border-2 border-dark rounded-[2.5rem] p-8 shadow-[6px_6px_0px_#111111] flex flex-col justify-between hover:translate-y-[-2px] transition-all duration-300">
+              <div>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-dark/5 p-3 rounded-2xl">
+                    {cap.icon}
+                  </div>
+                  <h3 className="font-heading font-bold text-lg uppercase tracking-tight">{cap.title}</h3>
+                </div>
+                <ul className="space-y-4 font-data text-xs text-dark/80">
+                  {cap.points.map((pt, idx) => (
+                    <li key={idx} className="flex items-start gap-2.5">
+                      <span className="text-accent font-bold mt-0.5">•</span>
+                      <span>{pt}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </section>
@@ -1768,6 +1869,7 @@ const Home = () => {
           onOpenCheckout={() => setIsCheckoutOpen(true)}
         />
         <VulnerabilityMatrix />
+        <Capabilities />
         <Features />
         <Philosophy />
         <Protocol />
@@ -1803,6 +1905,7 @@ const App = () => {
         <Route path="/" element={<Home />} />
         <Route path="/cert/:id" element={<CertPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/admin" element={<AdminDashboard />} />
       </Routes>
     </BrowserRouter>
   );

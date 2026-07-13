@@ -197,6 +197,151 @@ app.get('/api/agent/telemetry', async (req, res) => {
   }
 });
 
+// Admin Authorization Middleware
+const checkAdmin = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || authHeader !== 'Bearer admin-super-privilege') {
+    return res.status(401).json({ error: 'Unauthorized administrative access.' });
+  }
+  next();
+};
+
+// Admin Endpoints
+app.get('/api/admin/stats', checkAdmin, async (req, res) => {
+  try {
+    const usersCount = await prisma.user.count();
+    const scansCount = await prisma.scan.count();
+    const findingsCount = await prisma.finding.count();
+    const alertsCount = await prisma.agentAlert.count();
+    res.json({ usersCount, scansCount, findingsCount, alertsCount });
+  } catch (error) {
+    logger.error({ action: 'admin_stats_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch admin stats' });
+  }
+});
+
+app.get('/api/admin/users', checkAdmin, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(users);
+  } catch (error) {
+    logger.error({ action: 'admin_users_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch admin users' });
+  }
+});
+
+app.put('/api/admin/users/:id/tier', checkAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tier } = req.body;
+    const updated = await prisma.user.update({
+      where: { id },
+      data: { tier }
+    });
+    res.json(updated);
+  } catch (error) {
+    logger.error({ action: 'admin_update_tier_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to update user tier' });
+  }
+});
+
+app.delete('/api/admin/users/:id', checkAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.user.delete({
+      where: { id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ action: 'admin_delete_user_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+app.get('/api/admin/scans', checkAdmin, async (req, res) => {
+  try {
+    const scans = await prisma.scan.findMany({
+      include: {
+        _count: {
+          select: { findings: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(scans);
+  } catch (error) {
+    logger.error({ action: 'admin_scans_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch admin scans' });
+  }
+});
+
+app.get('/api/admin/scans/:id/findings', checkAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const findings = await prisma.finding.findMany({
+      where: { scanId: id }
+    });
+    res.json(findings);
+  } catch (error) {
+    logger.error({ action: 'admin_findings_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch findings' });
+  }
+});
+
+app.delete('/api/admin/scans/:id', checkAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.scan.delete({
+      where: { id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ action: 'admin_delete_scan_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to delete scan' });
+  }
+});
+
+app.get('/api/admin/alerts', checkAdmin, async (req, res) => {
+  try {
+    const alerts = await prisma.agentAlert.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(alerts);
+  } catch (error) {
+    logger.error({ action: 'admin_alerts_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to fetch alerts' });
+  }
+});
+
+app.post('/api/admin/alerts/mock', checkAdmin, async (req, res) => {
+  try {
+    const alert = await prisma.agentAlert.create({
+      data: {
+        projectId: 'mock-admin-testing',
+        command: 'rm -rf /var/www/html/secure_endpoint',
+        blocked: true
+      }
+    });
+    res.json(alert);
+  } catch (error) {
+    logger.error({ action: 'admin_mock_alert_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to create mock alert' });
+  }
+});
+
+app.delete('/api/admin/alerts', checkAdmin, async (req, res) => {
+  try {
+    await prisma.agentAlert.deleteMany({});
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ action: 'admin_clear_alerts_failed', error: error.message });
+    res.status(500).json({ error: 'Failed to clear alerts' });
+  }
+});
+
 app.listen(PORT, () => {
   logger.info(`[VibeAudit] Production Backend server running on port ${PORT}`);
 });
+
