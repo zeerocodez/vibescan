@@ -24,7 +24,9 @@ const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' 
+  ? (() => { throw new Error("CRITICAL SECURITY CONFIGURATION: JWT_SECRET must be set in production environment variables!"); })()
+  : 'vibescan_dev_fallback_secret_key_32_bytes_min');
 
 function base64UrlEncode(str) {
   return Buffer.from(str).toString('base64url');

@@ -7,7 +7,7 @@ function parseGitHubUrl(url) {
     const parsed = new URL(url);
     const parts = parsed.pathname.split('/').filter(Boolean);
     if (parsed.hostname === 'github.com' && parts.length >= 2) {
-      return { owner: parts[0], repo: parts[1] };
+      return { owner: parts[0], repo: parts[1].replace(/\.git$/i, '') };
     }
   } catch (e) {
     return null;
@@ -16,41 +16,36 @@ function parseGitHubUrl(url) {
 }
 
 async function downloadRepoZip(owner, repo) {
-  const url = `https://api.github.com/repos/${owner}/${repo}/zipball/master`;
   const token = process.env.GITHUB_TOKEN;
-  const headers = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeGuard-Scanner' };
+  const headers = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeScan-Engine/2.0' };
   if (token) {
     headers['Authorization'] = `token ${token}`;
   }
 
-  try {
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      headers
-    });
-    return response.data;
-  } catch (error) {
-    if (error.response?.status === 404) {
-      try {
-        const mainUrl = `https://api.github.com/repos/${owner}/${repo}/zipball/main`;
-        const mainResponse = await axios.get(mainUrl, {
-          responseType: 'arraybuffer',
-          headers
-        });
-        return mainResponse.data;
-      } catch (mainError) {
-        if (mainError.response?.status === 404) {
-          throw new Error(`Repository '${owner}/${repo}' not found, is private, or has no master/main branch.`);
-        }
-        throw new Error('Failed to download repository from GitHub.');
+  // Try main first, fallback to master
+  const branches = ['main', 'master'];
+  for (const branch of branches) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/zipball/${branch}`;
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers,
+        timeout: 20000
+      });
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        continue;
       }
+      throw new Error(`Failed to connect to GitHub API: ${error.message}`);
     }
-    throw new Error('Failed to connect to GitHub API.');
   }
+  throw new Error(`Repository '${owner}/${repo}' not found, is private, or has no main/master branch.`);
 }
 
 async function checkCVEs(dependencies) {
   const findings = [];
+  if (!dependencies || typeof dependencies !== 'object') return findings;
   const pkgs = Object.keys(dependencies);
   if (pkgs.length === 0) return findings;
 
@@ -68,57 +63,68 @@ async function checkCVEs(dependencies) {
     const validQueries = queries.filter(q => q.version);
     if (validQueries.length === 0) return findings;
 
-    const response = await axios.post('https://api.osv.dev/v1/querybatch', { queries: validQueries }, { timeout: 10000 });
+    const response = await axios.post('https://api.osv.dev/v1/querybatch', { queries: validQueries }, { timeout: 12000 });
     
     if (response.data?.results) {
       response.data.results.forEach((res, index) => {
         if (res.vulns && res.vulns.length > 0) {
           const vuln = res.vulns[0];
+          const pkgName = validQueries[index].package.name;
+          const pkgVer = validQueries[index].version;
           findings.push({
+            ruleId: 'VIBE-DEP-CVE',
             category: 'dependencies',
             severity: 'HIGH',
-            title: `Known Vulnerability in ${validQueries[index].package.name}`,
+            title: `Known Vulnerability in ${pkgName} (${vuln.id})`,
             file: 'package.json',
-            message: `The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent exploits.`,
-            description: `The package ${validQueries[index].package.name} at version ${validQueries[index].version} has a known CVE (${vuln.id}). Upgrade immediately to prevent exploits.`,
+            message: `The package ${pkgName}@${pkgVer} contains a published CVE vulnerability (${vuln.id}). Upgrade immediately to prevent exploits.`,
+            description: vuln.details || `Known vulnerability in ${pkgName}@${pkgVer} indexed in the OSV database.`,
             lineNumber: 1,
-            snippet: `"${validQueries[index].package.name}": "${dependencies[validQueries[index].package.name]}"`,
-            fixSuggestion: `Run npm install ${validQueries[index].package.name}@latest to upgrade the package version.`,
-            fixSnippet: `npm install ${validQueries[index].package.name}@latest`,
+            snippet: `"${pkgName}": "${dependencies[pkgName]}"`,
+            fixSuggestion: `Run npm install ${pkgName}@latest to upgrade to the patched version.`,
+            fixSnippet: `npm install ${pkgName}@latest`,
+            diffPatch: `--- a/package.json\n+++ b/package.json\n-    "${pkgName}": "${dependencies[pkgName]}"\n+    "${pkgName}": "^latest"`,
             cweId: 'CWE-1395',
-            cveId: vuln.id
+            cveId: vuln.id,
+            owaspId: 'LLM03'
           });
         }
       });
     }
   } catch (e) {
-    console.error('OSV API check failed:', e.message);
+    console.error('OSV CVE API check failed:', e.message);
   }
   return findings;
 }
 
 async function checkHallucinatedPackages(dependencies) {
   const findings = [];
+  if (!dependencies || typeof dependencies !== 'object') return findings;
   const pkgs = Object.keys(dependencies);
   
   for (const pkg of pkgs) {
+    // Skip local workspace packages or common built-in protocols
+    if (pkg.startsWith('@types/') || pkg.startsWith('file:') || pkg.startsWith('workspace:')) continue;
     try {
-      await axios.head(`https://registry.npmjs.org/${pkg}`, { timeout: 3000 });
+      await axios.head(`https://registry.npmjs.org/${encodeURIComponent(pkg)}`, { timeout: 3500 });
     } catch (e) {
       if (e.response?.status === 404) {
         findings.push({
+          ruleId: 'VIBE-DEP-SLOP',
           category: 'dependencies',
           severity: 'CRITICAL',
-          title: `AI Hallucinated Package: ${pkg}`,
+          title: `AI Hallucinated / Unregistered Package: ${pkg}`,
           file: 'package.json',
-          message: `The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`,
-          description: `The AI generated a dependency '${pkg}' that does not exist on npm. Attackers monitor these hallucinations to register malware under the fake name. Remove immediately.`,
+          message: `The dependency '${pkg}' was likely hallucinated by an AI coding assistant and does not exist in the official npm registry. Malicious actors monitor for such hallucinations to register malware under fake names (Slopsquatting).`,
+          description: `AI-generated code frequently invents package names. Attackers register these names to deliver supply-chain payloads.`,
           lineNumber: 1,
           snippet: `"${pkg}": "${dependencies[pkg]}"`,
-          fixSuggestion: `Verify the package name and verify whether it was hallucinated by an LLM assistant. Remove it from your package.json dependencies.`,
+          fixSuggestion: `Verify the package name. If hallucinated by an LLM, remove it immediately or replace with an established alternative.`,
           fixSnippet: `npm uninstall ${pkg}`,
+          diffPatch: `--- a/package.json\n+++ b/package.json\n-    "${pkg}": "${dependencies[pkg]}"`,
           cweId: 'CWE-1357',
-          cveId: null
+          cveId: null,
+          owaspId: 'LLM03'
         });
       }
     }
@@ -133,50 +139,38 @@ function getFilesFromZip(zipBuffer) {
   
   let totalSize = 0;
   let fileCount = 0;
-  const MAX_SIZE = 10 * 1024 * 1024; // 10MB limit
-  const MAX_FILES = 80;              // 80 files limit
+  const MAX_SIZE = 25 * 1024 * 1024; // 25MB limit (elevated for full-stack apps)
+  const MAX_FILES = 200;              // 200 files limit
+
+  const IGNORED_PATTERNS = [
+    'node_modules/', '.git/', 'dist/', 'build/', '.next/', '.nuxt/',
+    'coverage/', '.turbo/', '.cache/', '.vscode/', '.idea/',
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb',
+    '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp', '.mp4',
+    '.woff', '.woff2', '.ttf', '.eot', '.zip', '.tar', '.gz', '.pdf'
+  ];
 
   for (const entry of entries) {
     if (entry.isDirectory) continue;
     
-    const name = entry.entryName.toLowerCase();
-    if (
-      name.includes('node_modules/') ||
-      name.includes('.git/') ||
-      name.includes('dist/') ||
-      name.includes('scanner.js') ||
-      name.includes('scanengine') ||
-      name.includes('test-') ||
-      name.endsWith('.png') ||
-      name.endsWith('.jpg') ||
-      name.endsWith('.jpeg') ||
-      name.endsWith('.gif') ||
-      name.endsWith('.ico') ||
-      name.endsWith('.woff') ||
-      name.endsWith('.woff2') ||
-      name.endsWith('package-lock.json') ||
-      name.endsWith('yarn.lock') ||
-      name.endsWith('pnpm-lock.yaml') ||
-      name.endsWith('.zip')
-    ) {
-      continue;
-    }
+    const entryNameLower = entry.entryName.toLowerCase();
+    const isIgnored = IGNORED_PATTERNS.some(pat => entryNameLower.includes(pat));
+    if (isIgnored) continue;
     
     try {
       const data = entry.getData();
-      
-      // Zip bomb / size mitigation
       totalSize += data.length;
       fileCount++;
+
       if (totalSize > MAX_SIZE) {
-        throw new Error('Repository exceeds safety scan limits (Max size: 10MB).');
+        throw new Error('Repository exceeds safety scan limits (Max size: 25MB).');
       }
       if (fileCount > MAX_FILES) {
-        throw new Error('Repository exceeds safety scan limits (Max files: 80).');
+        break; // Scan first 200 essential code files safely
       }
 
       const content = data.toString('utf8');
-      if (content.includes('\u0000')) continue;
+      if (content.includes('\u0000')) continue; // Skip binary files
       
       const parts = entry.entryName.split('/');
       const filePath = parts.length > 1 ? parts.slice(1).join('/') : entry.entryName;
@@ -194,18 +188,22 @@ function getFilesFromZip(zipBuffer) {
 function applyLocalDlp(content) {
   if (typeof content !== 'string') return content;
   let redacted = content;
-  // Redact OpenAI keys
+  // Redact OpenAI / Anthropic keys
   redacted = redacted.replace(/sk-[a-zA-Z0-9]{32,}/g, (m) => `sk-...[REDACTED_DLP_${m.slice(-4)}]`);
+  redacted = redacted.replace(/sk-ant-[a-zA-Z0-9]{32,}/g, (m) => `sk-ant-...[REDACTED_DLP_${m.slice(-4)}]`);
+  // Redact Paystack / Flutterwave keys
+  redacted = redacted.replace(/sk_(live|test)_[0-9a-zA-Z]{20,}/g, (m) => `sk_...[REDACTED_DLP_${m.slice(-4)}]`);
+  redacted = redacted.replace(/FLWSECK(_TEST)?-[0-9a-zA-Z]{20,}/g, '[REDACTED_FLUTTERWAVE_SECRET]');
   // Redact AWS credentials
   redacted = redacted.replace(/AKIA[0-9A-Z]{16}/g, (m) => `AKIA...[REDACTED_DLP_${m.slice(-4)}]`);
   // Redact Stripe keys
-  redacted = redacted.replace(/(sk_live|sk_test)_[0-9a-zA-Z]{24}/g, (m) => `sk_...[REDACTED_DLP_${m.slice(-4)}]`);
+  redacted = redacted.replace(/(sk_live|sk_test|rk_live)_[0-9a-zA-Z]{24,}/g, (m) => `sk_...[REDACTED_DLP_${m.slice(-4)}]`);
   // Redact Slack webhooks
   redacted = redacted.replace(/https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9_]{8}\/B[A-Z0-9_]{8}\/[A-Za-z0-9_]{24}/g, '[REDACTED_SLACK_WEBHOOK]');
   // Redact JWT secrets
   redacted = redacted.replace(/eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g, '[REDACTED_JWT_TOKEN]');
   // Redact DB URLs
-  redacted = redacted.replace(/postgres:\/\/[^:]+:[^@]+@/g, 'postgres://[REDACTED_DB_CREDENTIALS]@');
+  redacted = redacted.replace(/postgres(ql)?:\/\/[^:]+:[^@]+@/g, 'postgres://[REDACTED_DB_CREDENTIALS]@');
   return redacted;
 }
 
@@ -217,37 +215,39 @@ async function runGeminiAudit(files, repoName) {
     .map(
       (f) => `
 === File: ${f.filePath} ===
-${applyLocalDlp(f.content).substring(0, 8000)}
+${applyLocalDlp(f.content).substring(0, 7000)}
 `
     )
     .join('\n');
 
   const prompt = `
-You are VibeScan, an elite AI Security Audit engine.
-Analyze the following files from the project "${repoName}" for security concerns.
+You are VibeScan, an elite AI Security Audit engine specializing in finding vulnerabilities in AI-generated ('vibe-coded') applications.
+Analyze the following source files from "${repoName}" for security and architectural flaws.
 
-Identify items in these categories:
-1. "hardcodedSecrets": Hardcoded API keys (OpenAI 'sk-', AWS, Stripe, Slack webhooks, JWT tokens, Private Keys, DB URLs with passwords, committed .env files). CRITICAL/HIGH severity.
-2. "dependencies": Vulnerable dependencies or hallucinated packages.
-3. "owasp": OWASP risks (eval() usages, SQL string concatenations, debug modes, unvalidated inputs, innerHTML usage without sanitization).
-4. "accessGaps": access controls/gaps (CORS wildcard, missing HTTP headers, insecure routing).
-5. "insecureDefaults": code smells, weak cryptographic algorithm configurations, and other bad practices.
-6. "aiRisks": AI and LLM security issues (prompt injection, missing DLP, unbounded consumption).
+Identify items across these categories:
+1. "hardcodedSecrets": Exposed OpenAI/Anthropic/Google keys, Paystack/Flutterwave secret keys, Stripe keys, Supabase Service Role keys on client, DB URLs, Private Keys.
+2. "webhookSecurity": Webhook handlers missing constant-time cryptographic HMAC verification (crypto.timingSafeEqual).
+3. "databaseSecurity": Unauthenticated Supabase/Firebase queries, missing RLS, or exposed database credentials.
+4. "promptSecurity": Unsanitized user inputs interpolated into system prompts (Prompt Injection / OWASP LLM01).
+5. "owasp": Direct eval(), command execution, raw SQL query concatenation, unescaped innerHTML on LLM outputs.
+6. "accessGaps": Wildcard CORS, unauthenticated Next.js Server Actions, insecure routing.
 
-For each finding, provide:
-- "category": 'hardcodedSecrets' | 'dependencies' | 'owasp' | 'accessGaps' | 'insecureDefaults' | 'aiRisks'
-- "severity": 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
-- "title": Clean, short vulnerability title (e.g. "Exposed OpenAI API Key")
-- "description": Explanation of the risk
-- "filePath": Relative path of the file
-- "lineNumber": Approximate line number (1-indexed) where it starts
-- "snippet": The offending line of code (IMPORTANT: Redact/Mask the actual secret value! Never output the actual secret - use sk-abc123... or [REDACTED] inside the snippet).
-- "fixSuggestion": Clear, actionable advice on how to fix it in plain English
-- "fixSnippet": Code snippet showing the corrected implementation
-- "cweId": CWE identifier if applicable (e.g., "CWE-798", "CWE-94", "CWE-89")
-- "cveId": CVE identifier if applicable
+For each finding, return:
+- "ruleId": "VIBE-001" through "VIBE-010" or "OWASP-xxx"
+- "category": 'hardcodedSecrets' | 'webhookSecurity' | 'databaseSecurity' | 'promptSecurity' | 'owasp' | 'accessGaps' | 'dependencies'
+- "severity": 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+- "title": Short descriptive title
+- "description": Why this is dangerous
+- "filePath": Relative path
+- "lineNumber": Approximate line number
+- "snippet": Redacted offending line of code
+- "fixSuggestion": Concrete explanation of how to fix
+- "fixSnippet": Secure replacement code
+- "diffPatch": Unified diff format (--- a/file +++ b/file - old + new)
+- "cweId": CWE identifier (e.g. CWE-798, CWE-94, CWE-321)
+- "owaspId": OWASP LLM identifier (e.g. LLM01, LLM02, LLM05)
 
-Project Source Files:
+Source Files:
 ${fileSummary}
 `;
 
@@ -265,6 +265,7 @@ ${fileSummary}
               items: {
                 type: "OBJECT",
                 properties: {
+                  ruleId: { type: "STRING" },
                   category: { type: "STRING" },
                   severity: { type: "STRING" },
                   title: { type: "STRING" },
@@ -274,8 +275,9 @@ ${fileSummary}
                   snippet: { type: "STRING" },
                   fixSuggestion: { type: "STRING" },
                   fixSnippet: { type: "STRING" },
+                  diffPatch: { type: "STRING" },
                   cweId: { type: "STRING" },
-                  cveId: { type: "STRING" }
+                  owaspId: { type: "STRING" }
                 },
                 required: ["category", "severity", "title", "description", "filePath"]
               }
@@ -292,283 +294,387 @@ ${fileSummary}
       return JSON.parse(text);
     }
   } catch (error) {
-    console.error('Gemini AI audit failed, falling back to static engine:', error.message);
+    console.error('Gemini AI audit failed, relying on deterministic static engine:', error.message);
   }
   return null;
 }
 
+// -----------------------------------------------------------------------------
+// DETERMINISTIC 10 CORE VIBE-CODE SECURITY RULES (SAST ENGINE)
+// -----------------------------------------------------------------------------
 const staticRules = {
   hardcodedSecrets: [
     {
-      regex: /sk-[a-zA-Z0-9]{32,}/g,
-      title: 'Exposed OpenAI API Key',
+      ruleId: 'VIBE-001',
+      regex: /sk-[a-zA-Z0-9]{32,}|sk-ant-[a-zA-Z0-9]{32,}|AIzaSy[a-zA-Z0-9_-]{33}/g,
+      title: 'Exposed AI API Key (OpenAI / Anthropic / Gemini)',
       severity: 'CRITICAL',
-      description: 'A hardcoded OpenAI API key was detected in the codebase. Anyone who accesses this code can use your account, run up your usage limits, and cause financial liability.',
-      fixSuggestion: 'Store your secret key in an environment variable (e.g., `process.env.OPENAI_API_KEY`) and load it dynamically.',
+      owaspId: 'LLM02',
+      description: 'A hardcoded AI model secret key was detected in your codebase. If committed or exposed in client bundles, attackers can drain API credit balances and access model fine-tunes.',
+      fixSuggestion: 'Move key to server-side .env configuration (e.g. `process.env.OPENAI_API_KEY`). Never expose in `VITE_` or `NEXT_PUBLIC_` variables.',
       fixSnippet: 'const apiKey = process.env.OPENAI_API_KEY;',
+      diffPatch: '- const apiKey = "[EXPOSED_OPENAI_KEY]";\n+ const apiKey = process.env.OPENAI_API_KEY;',
       cweId: 'CWE-798'
     },
     {
-      regex: /AKIA[0-9A-Z]{16}/g,
-      title: 'Exposed AWS Access Key ID',
+      ruleId: 'VIBE-002',
+      regex: /sk_(live|test)_[0-9a-zA-Z]{20,}|FLWSECK(_TEST)?-[0-9a-zA-Z]{20,}/g,
+      title: 'Exposed Paystack / Flutterwave Secret Key',
       severity: 'CRITICAL',
-      description: 'A hardcoded AWS Access Key ID was detected in the codebase. This could allow attackers to query or modify your AWS services.',
-      fixSuggestion: 'Use the AWS SDK credentials provider to load keys from system environment variables or IAM role configurations.',
-      fixSnippet: "const credentials = new AWS.EnvironmentCredentials('AWS');",
+      owaspId: 'LLM02',
+      description: 'An exposed African payment gateway secret key was detected. Attackers can initiate fraudulent refunds, spoof transactions, and compromise merchant balances.',
+      fixSuggestion: 'Store your secret key strictly on backend environment variables and verify webhook events server-side.',
+      fixSnippet: 'const paystackSecret = process.env.PAYSTACK_SECRET_KEY;',
+      diffPatch: '- const secret = "[EXPOSED_PAYSTACK_KEY]";\n+ const secret = process.env.PAYSTACK_SECRET_KEY;',
       cweId: 'CWE-798'
     },
     {
-      regex: /(sk_live|sk_test)_[0-9a-zA-Z]{24}/g,
-      title: 'Exposed Stripe Secret Key',
+      ruleId: 'VIBE-003',
+      regex: /(sk_live|rk_live)_[0-9a-zA-Z]{24,}|whsec_[0-9a-zA-Z]{24,}/g,
+      title: 'Exposed Stripe Secret or Webhook Key',
       severity: 'CRITICAL',
-      description: 'An exposed Stripe secret key was detected. Attackers can execute charges, refund transactions, or download customer databases.',
-      fixSuggestion: 'Move key to environment configuration and load it on server-side only.',
+      owaspId: 'LLM02',
+      description: 'An exposed Stripe secret key or webhook signing secret was detected. Attackers can execute charges, issue unauthorized refunds, or download customer records.',
+      fixSuggestion: 'Move secret key to secure backend environment variables.',
       fixSnippet: 'const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);',
+      diffPatch: '- const stripe = new Stripe("[EXPOSED_STRIPE_KEY]");\n+ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);',
       cweId: 'CWE-798'
     },
     {
-      regex: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/g,
-      title: 'Hardcoded Private Key',
+      ruleId: 'VIBE-004',
+      regex: /(SUPABASE_SERVICE_ROLE_KEY|service_role_key|supabaseServiceKey)\s*[:=]\s*['"][a-zA-Z0-9._-]+['"]/gi,
+      title: 'Supabase Service Role Key Exposed on Client',
       severity: 'CRITICAL',
-      description: 'An exposed RSA/EC Private Key was detected in code. This allows complete server control compromise.',
-      fixSuggestion: 'Load cryptographic keys dynamically from a secure file system storage path or secrets manager.',
-      fixSnippet: "const cert = fs.readFileSync('/etc/ssl/certs/private.key');",
-      cweId: 'CWE-321'
-    },
-    {
-      regex: /https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9_]{8}\/B[A-Z0-9_]{8}\/[A-Za-z0-9_]{24}/g,
-      title: 'Exposed Slack Webhook URL',
-      severity: 'HIGH',
-      description: 'Exposed Slack webhooks allow spammers or attackers to send messages to your internal channels.',
-      fixSuggestion: 'Move the webhook URL to system environment variable.',
-      fixSnippet: 'const webhook = process.env.SLACK_WEBHOOK_URL;',
+      owaspId: 'LLM02',
+      description: 'The Supabase Service Role key bypasses all PostgreSQL Row Level Security (RLS) policies. Using it in frontend code allows any user to read or drop entire database tables.',
+      fixSuggestion: 'Only use NEXT_PUBLIC_SUPABASE_ANON_KEY on the client. Keep the Service Role key exclusively in secure backend server actions or edge functions.',
+      fixSnippet: 'const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);',
+      diffPatch: '- const supabase = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY);\n+ const supabase = createClient(url, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);',
       cweId: 'CWE-798'
     },
     {
-      regex: /eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/g,
-      title: 'Hardcoded JWT Secret Token',
-      severity: 'HIGH',
-      description: 'A hardcoded JWT sign or verify secret was found. Allows attackers to forge valid credentials and bypass authentication.',
-      fixSuggestion: 'Inject a cryptographically secure key via environment configurations.',
-      fixSnippet: 'jwt.verify(token, process.env.JWT_SECRET_KEY);',
-      cweId: 'CWE-321'
-    },
-    {
-      regex: /postgres:\/\/[^:]+:[^@]+@/g,
-      title: 'Database Plaintext Password Leak',
+      ruleId: 'VIBE-006',
+      regex: /postgres(ql)?:\/\/[a-zA-Z0-9._-]+:[^@\s]+@[a-zA-Z0-9.-]+:[0-9]+\/[a-zA-Z0-9._-]+/g,
+      title: 'Database Plaintext Password Leak in Connection String',
       severity: 'CRITICAL',
-      description: 'Exposed database connection string containing plaintext passwords. Allows direct access to the application datastore.',
-      fixSuggestion: 'Load datastore credentials dynamically via system-level parameters.',
+      owaspId: 'LLM02',
+      description: 'A database connection URI with embedded plaintext username and password was found. Direct datastore access can be obtained by unauthorized parties.',
+      fixSuggestion: 'Inject database connection strings dynamically via system-level environment variables (DATABASE_URL).',
       fixSnippet: 'const client = new Client({ connectionString: process.env.DATABASE_URL });',
+      diffPatch: '- const uri = "postgres://user:password@db.example.com/main";\n+ const uri = process.env.DATABASE_URL;',
       cweId: 'CWE-798'
+    },
+    {
+      ruleId: 'VIBE-SEC-KEY',
+      regex: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/g,
+      title: 'Hardcoded Cryptographic Private Key',
+      severity: 'CRITICAL',
+      owaspId: 'LLM02',
+      description: 'An exposed RSA/EC Private Key was detected in code. This allows complete server impersonation and TLS/decryption compromise.',
+      fixSuggestion: 'Load cryptographic keys dynamically from secure filesystem key vaults or KMS.',
+      fixSnippet: "const cert = fs.readFileSync(process.env.PRIVATE_KEY_PATH);",
+      diffPatch: '- const key = "-----BEGIN PRIVATE KEY-----...";\n+ const key = fs.readFileSync(process.env.PRIVATE_KEY_PATH);',
+      cweId: 'CWE-321'
     }
   ],
-  injectionRisks: [
+  webhookSecurity: [
     {
-      regex: /eval\s*\(/g,
-      title: 'Unsafe eval() Usage',
+      ruleId: 'VIBE-005',
+      regex: /(req\.headers\['x-paystack-signature'\]|req\.headers\['stripe-signature'\]|req\.headers\['verif-hash'\])/i,
+      title: 'Webhook Signature Missing Constant-Time Verification',
       severity: 'HIGH',
-      description: 'Execution of eval() on unvalidated inputs allows Remote Code Execution (RCE) attacks.',
-      fixSuggestion: 'Refactor dynamic executions to use standard JSON.parse() or specific dynamic map structures.',
+      owaspId: 'LLM05',
+      description: 'Webhook verification using standard equality (===) is vulnerable to timing side-channel attacks. A webhook signature must be verified using crypto.timingSafeEqual.',
+      fixSuggestion: 'Use crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computedHash)) to protect webhook authentication.',
+      fixSnippet: 'const isValid = crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(computedHash, "utf8"));',
+      diffPatch: '- if (signature === computedHash) {\n+ if (crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(computedHash, "utf8"))) {',
+      cweId: 'CWE-208'
+    }
+  ],
+  promptSecurity: [
+    {
+      ruleId: 'VIBE-007',
+      regex: /(prompt|system_message|systemPrompt|systemMessage)\s*(\+?=|\:)\s*(`[^`]*\$\{(req\.body|req\.query|userInput|input|query)\.[^}]+\}[^`]*`|.*\b(req\.body|req\.query|userInput)\b)/i,
+      title: 'Prompt Injection Risk (Direct Input Interpolation)',
+      severity: 'HIGH',
+      owaspId: 'LLM01',
+      description: 'Direct string concatenation of untrusted user input into system prompts allows jailbreaking and prompt injection attacks.',
+      fixSuggestion: 'Isolate system instructions from user messages using separate role messages with strict input sanitization.',
+      fixSnippet: 'const messages = [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: sanitizeInput(userInput) }];',
+      diffPatch: '- const prompt = `You are a bot. Answer this: ${req.body.text}`;\n+ const messages = [{ role: "system", content: "You are a bot." }, { role: "user", content: sanitize(req.body.text) }];',
+      cweId: 'CWE-1156'
+    },
+    {
+      ruleId: 'VIBE-010',
+      regex: /openai\.(chat\.)?completions\.create\(\s*\{(?![^}]*max_tokens)/i,
+      title: 'Unbounded LLM Consumption Risk (Denial of Wallet)',
+      severity: 'MEDIUM',
+      owaspId: 'LLM10',
+      description: 'Calling LLM completions without an explicit max_tokens cap can result in high token usage fees or service exhaustion.',
+      fixSuggestion: 'Always define an explicit max_tokens limit on completion calls.',
+      fixSnippet: "openai.chat.completions.create({ model: 'gpt-4o', messages, max_tokens: 500 });",
+      diffPatch: '- openai.chat.completions.create({ model: "gpt-4o", messages });\n+ openai.chat.completions.create({ model: "gpt-4o", messages, max_tokens: 500 });',
+      cweId: 'CWE-400'
+    }
+  ],
+  owasp: [
+    {
+      ruleId: 'VIBE-008',
+      regex: /eval\s*\(/g,
+      title: 'Unsafe eval() Dynamic Code Execution',
+      severity: 'CRITICAL',
+      owaspId: 'LLM05',
+      description: 'Executing eval() on dynamic or AI-generated strings enables Remote Code Execution (RCE).',
+      fixSuggestion: 'Replace eval() with structured JSON.parse() or a sandboxed execution context.',
       fixSnippet: 'const data = JSON.parse(input);',
+      diffPatch: '- const result = eval(userInput);\n+ const result = JSON.parse(userInput);',
       cweId: 'CWE-94'
     },
     {
-      regex: /exec\s*\(/g,
-      title: 'Unsafe exec() Command Execution',
-      severity: 'HIGH',
-      description: 'Execution of arbitrary shell commands via exec() could allow OS Command Injection.',
-      fixSuggestion: 'Use execFile or parameterized arguments in spawn, avoiding shell execution mode.',
-      fixSnippet: "child_process.execFile('/usr/bin/git', ['clone', url]);",
+      ruleId: 'VIBE-008-EXEC',
+      regex: /exec\s*\(\s*`.*?\$\{.*?\}.*?`\s*\)/g,
+      title: 'Command Injection via Unsanitized exec()',
+      severity: 'CRITICAL',
+      owaspId: 'LLM05',
+      description: 'Passing user input directly into shell execution enables OS Command Injection.',
+      fixSuggestion: 'Use child_process.execFile() or spawn() with argument arrays instead of raw shell execution.',
+      fixSnippet: "child_process.execFile('/usr/bin/git', ['clone', sanitizedUrl]);",
+      diffPatch: '- exec(`git clone ${url}`);\n+ execFile("/usr/bin/git", ["clone", url]);',
       cweId: 'CWE-78'
     },
     {
-      regex: /\.innerHTML\s*=/g,
-      title: 'Potential XSS via innerHTML',
+      ruleId: 'VIBE-008-SQL',
+      regex: /\.(query|execute|\$queryRawUnsafe)\s*\(\s*`.*?\$\{.*?\}.*?`\s*\)/g,
+      title: 'Raw SQL String Concatenation (SQL Injection)',
       severity: 'HIGH',
-      description: 'Setting innerHTML directly with user input allows Cross-Site Scripting (XSS).',
-      fixSuggestion: 'Use textContent or dynamic DOM methods to safely assign user content.',
-      fixSnippet: 'element.textContent = userInput;',
-      cweId: 'CWE-79'
+      owaspId: 'LLM05',
+      description: 'Raw database query execution using string interpolation allows SQL injection attacks.',
+      fixSuggestion: 'Refactor to parameterized queries or Prisma $queryRaw with template tags.',
+      fixSnippet: "db.query('SELECT * FROM users WHERE id = $1', [userId]);",
+      diffPatch: '- db.query(`SELECT * FROM users WHERE id = ${userId}`);\n+ db.query("SELECT * FROM users WHERE id = $1", [userId]);',
+      cweId: 'CWE-89'
     },
     {
-      regex: /\.(query|execute)\s*\(\s*`.*?\$\{.*?\}.*?`\s*\)/g,
-      title: 'SQL Query Concatenation',
+      ruleId: 'VIBE-008-XSS',
+      regex: /(\.innerHTML\s*=|dangerouslySetInnerHTML\s*=\s*\{\s*__html\s*:)/g,
+      title: 'Potential XSS via Raw HTML Injection',
       severity: 'HIGH',
-      description: 'Detected raw database query execution using string concatenation. Vulnerable to SQL injection.',
-      fixSuggestion: 'Refactor to parameterize your SQL query parameters.',
-      fixSnippet: "db.query('SELECT * FROM users WHERE id = $1', [userId]);",
-      cweId: 'CWE-89'
+      owaspId: 'LLM05',
+      description: 'Injecting raw HTML without DOMPurify sanitization allows Cross-Site Scripting (XSS).',
+      fixSuggestion: 'Sanitize strings using DOMPurify before assigning to innerHTML or dangerouslySetInnerHTML.',
+      fixSnippet: 'element.innerHTML = DOMPurify.sanitize(userInput);',
+      diffPatch: '- element.innerHTML = userInput;\n+ element.innerHTML = DOMPurify.sanitize(userInput);',
+      cweId: 'CWE-79'
     }
   ],
   accessGaps: [
     {
-      regex: /cors\(\s*\{\s*origin:\s*['"]\*['"]\s*\}\s*\)/g,
-      title: 'Wildcard CORS Policy',
-      severity: 'MEDIUM',
-      description: 'Configuring a wildcard (*) Access-Control-Allow-Origin header allows external scripts to interact with your services.',
-      fixSuggestion: 'Verify origin against an explicit list of trusted hosts.',
-      fixSnippet: "cors({ origin: ['https://trusteddomain.com'] });",
+      ruleId: 'VIBE-009',
+      regex: /cors\(\s*\{\s*origin:\s*['"]\*['"]\s*,\s*credentials:\s*true\s*\}\s*\)/gi,
+      title: 'Permissive CORS with Credentials Enabled',
+      severity: 'HIGH',
+      owaspId: 'LLM02',
+      description: 'Configuring wildcard CORS (*) while allowing credentials (cookies/auth headers) creates a severe Cross-Origin vulnerability.',
+      fixSuggestion: 'Specify explicit trusted origins in CORS configuration instead of wildcards.',
+      fixSnippet: "cors({ origin: ['https://app.yourdomain.com'], credentials: true });",
+      diffPatch: '- cors({ origin: "*", credentials: true });\n+ cors({ origin: [process.env.ALLOWED_ORIGIN], credentials: true });',
       cweId: 'CWE-942'
-    }
-  ],
-  insecureDefaults: [
-    {
-      regex: /DEBUG\s*=\s*(True|true)/g,
-      title: 'Debug Mode Enabled',
-      severity: 'LOW',
-      description: 'Running in debug mode displays detailed internal framework details to external visitors, causing information leakage.',
-      fixSuggestion: 'Ensure debug flag is set to false in production.',
-      fixSnippet: 'const DEBUG = false;',
-      cweId: 'CWE-489'
     },
     {
+      ruleId: 'VIBE-SSL-VERIF',
       regex: /rejectUnauthorized\s*:\s*false/g,
-      title: 'Insecure SSL Verification Disabled',
+      title: 'Insecure SSL Certificate Verification Disabled',
       severity: 'HIGH',
-      description: 'Setting rejectUnauthorized to false disables server certificate verification, enabling Man-in-the-Middle (MitM) attacks.',
-      fixSuggestion: 'Always verify SSL certificates in production.',
+      owaspId: 'LLM02',
+      description: 'Disabling rejectUnauthorized removes TLS certificate validation, exposing all database or API traffic to Man-in-the-Middle (MitM) eavesdropping.',
+      fixSuggestion: 'Always verify SSL certificates in production environments.',
       fixSnippet: 'rejectUnauthorized: true,',
+      diffPatch: '- rejectUnauthorized: false,\n+ rejectUnauthorized: true,',
       cweId: 'CWE-295'
-    }
-  ],
-  aiRisks: [
-    {
-      regex: /(prompt|system_message|context)\s*(\+?=)\s*.*\b(req\.body|req\.query|userInput)\b/i,
-      title: 'Prompt Injection Risk',
-      severity: 'HIGH',
-      description: 'Direct interpolation of user input inside system message prompts is vulnerable to jailbreaking or prompt injection.',
-      fixSuggestion: 'Sanitize user inputs and restrict system configuration instructions.',
-      fixSnippet: 'const messages = [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: sanitizeInput(userInput) }];',
-      cweId: 'CWE-1156'
-    },
-    {
-      regex: /openai\.chat\.completions\.create.*(?!.*max_tokens)/i,
-      title: 'Unbounded Consumption Risk',
-      severity: 'MEDIUM',
-      description: 'LLM completion calls without a max_tokens limit can allow denial of service or high API usage costs.',
-      fixSuggestion: 'Configure an explicit max_tokens option in the API config.',
-      fixSnippet: "openai.chat.completions.create({ model: 'gpt-4', messages, max_tokens: 150 });",
-      cweId: 'CWE-400'
     }
   ]
 };
 
+// -----------------------------------------------------------------------------
+// DAST ACTIVE LIVE WEB SCANNER (ENDPOINT & HEADERS PROBER)
+// -----------------------------------------------------------------------------
 async function runWebScan(url) {
   let domain = 'unknown';
+  let origin = url;
   try {
     const parsed = new URL(url);
     domain = parsed.hostname;
+    origin = parsed.origin;
   } catch (e) {
-    throw new Error('Invalid Website URL');
+    throw new Error('Invalid Web Application URL');
   }
 
   const findings = [];
   let scorePoints = 100;
 
+  // 1. DAST Sensitive File & Git Leak Probing
+  const sensitivePaths = [
+    { path: '/.env', title: 'Publicly Accessible .env File', severity: 'CRITICAL', cweId: 'CWE-552' },
+    { path: '/.git/config', title: 'Publicly Accessible Git Configuration (/.git/config)', severity: 'CRITICAL', cweId: 'CWE-552' },
+    { path: '/.env.local', title: 'Publicly Accessible Local Environment File', severity: 'CRITICAL', cweId: 'CWE-552' },
+    { path: '/api/debug', title: 'Public Debug Endpoint Exposed (/api/debug)', severity: 'HIGH', cweId: 'CWE-489' }
+  ];
+
+  for (const item of sensitivePaths) {
+    try {
+      const probeRes = await axios.get(`${origin}${item.path}`, { 
+        timeout: 4000, 
+        headers: { 'User-Agent': 'VibeScan-DAST/2.0' },
+        validateStatus: () => true 
+      });
+
+      if (probeRes.status === 200 && typeof probeRes.data === 'string' && (probeRes.data.includes('KEY') || probeRes.data.includes('repositoryformatversion') || probeRes.data.includes('DATABASE') || probeRes.data.includes('SECRET'))) {
+        scorePoints -= 35;
+        findings.push({
+          ruleId: 'DAST-FILE-LEAK',
+          category: 'hardcodedSecrets',
+          severity: item.severity,
+          title: item.title,
+          file: item.path,
+          message: `Your live deployment exposes sensitive configuration data at ${origin}${item.path}. Attackers can download environment credentials or full source history.`,
+          description: `Direct HTTP access to configuration files allows complete credential compromise.`,
+          lineNumber: 1,
+          snippet: `GET ${item.path} -> HTTP 200 OK`,
+          fixSuggestion: 'Configure your web server / CDN (Vercel, Nginx, Cloudflare) to block access to dotfiles and sensitive paths.',
+          fixSnippet: 'location ~ /\\.(?!well-known) { deny all; }',
+          cweId: item.cweId,
+          owaspId: 'LLM02'
+        });
+      }
+    } catch (e) {
+      // Path safely blocked or timed out
+    }
+  }
+
+  // 2. DAST Security Headers Audit
   try {
-    const response = await axios.get(url, { timeout: 8000, headers: { 'User-Agent': 'VibeGuard-Scanner/1.0' } });
+    const response = await axios.get(url, { 
+      timeout: 8000, 
+      headers: { 'User-Agent': 'VibeScan-DAST/2.0' },
+      validateStatus: () => true
+    });
     const headers = response.headers;
 
     if (!headers['strict-transport-security']) {
       scorePoints -= 15;
       findings.push({
+        ruleId: 'DAST-HSTS',
         category: 'accessGaps',
         severity: 'HIGH',
         title: 'Missing HTTP Strict Transport Security (HSTS)',
         file: 'HTTP Headers',
-        message: 'Your website does not enforce HTTPS via HSTS headers. Man-in-the-middle attackers could intercept and downgrade traffic.',
-        description: 'Your website does not enforce HTTPS via HSTS headers. Man-in-the-middle attackers could intercept and downgrade traffic.',
+        message: 'Your website does not enforce HTTPS via HSTS headers. Attackers on public WiFi can downgrade and intercept traffic.',
+        description: 'Missing Strict-Transport-Security allows SSL-stripping attacks.',
         lineNumber: 1,
         snippet: 'GET / HTTP/1.1',
-        fixSuggestion: 'Enable HSTS in your backend server security headers config.',
+        fixSuggestion: 'Enable HSTS with max-age and includeSubDomains in your server configuration.',
         fixSnippet: "res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');",
-        cweId: 'CWE-523'
+        cweId: 'CWE-523',
+        owaspId: 'LLM02'
       });
     }
 
     if (!headers['content-security-policy']) {
-      scorePoints -= 25;
+      scorePoints -= 20;
       findings.push({
+        ruleId: 'DAST-CSP',
         category: 'accessGaps',
         severity: 'HIGH',
         title: 'Missing Content Security Policy (CSP)',
         file: 'HTTP Headers',
-        message: 'Your site does not define a CSP header. Attackers can execute unauthorized scripts or launch XSS exploits.',
-        description: 'Your site does not define a CSP header. Attackers can execute unauthorized scripts or launch XSS exploits.',
+        message: 'Your site does not define a CSP header. Attackers can execute injected scripts and exfiltrate credentials.',
+        description: 'Missing CSP header fails to restrict scripts and frame sources.',
         lineNumber: 1,
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Implement a strict Content Security Policy (CSP) header.',
-        fixSnippet: "res.setHeader('Content-Security-Policy', \"default-src 'self'; script-src 'self' 'unsafe-inline'\");",
-        cweId: 'CWE-1021'
+        fixSnippet: "res.setHeader('Content-Security-Policy', \"default-src 'self'; script-src 'self';\");",
+        cweId: 'CWE-1021',
+        owaspId: 'LLM05'
       });
     }
 
     if (!headers['x-frame-options']) {
-      scorePoints -= 15;
+      scorePoints -= 10;
       findings.push({
+        ruleId: 'DAST-FRAME',
         category: 'accessGaps',
         severity: 'MEDIUM',
-        title: 'Missing X-Frame-Options header',
+        title: 'Missing X-Frame-Options (Clickjacking Risk)',
         file: 'HTTP Headers',
-        message: 'Your pages do not block embedding. Attackers can frame your app to trick users into clicking invisible buttons (Clickjacking).',
-        description: 'Your pages do not block embedding. Attackers can frame your app to trick users into clicking invisible buttons (Clickjacking).',
+        message: 'Your pages do not block framing. Attackers can iframe your application to trick users into invisible clicks.',
+        description: 'Missing X-Frame-Options allows clickjacking attacks.',
         lineNumber: 1,
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Set X-Frame-Options to DENY or SAMEORIGIN.',
         fixSnippet: "res.setHeader('X-Frame-Options', 'DENY');",
-        cweId: 'CWE-1021'
+        cweId: 'CWE-1021',
+        owaspId: 'LLM05'
       });
     }
 
     if (!headers['x-content-type-options']) {
       scorePoints -= 10;
       findings.push({
-        category: 'insecureDefaults',
+        ruleId: 'DAST-MIME',
+        category: 'accessGaps',
         severity: 'LOW',
-        title: 'Missing X-Content-Type-Options header',
+        title: 'Missing X-Content-Type-Options: nosniff',
         file: 'HTTP Headers',
-        message: 'Missing nosniff attribute. Browsers can guess content types and run text files as scripts.',
-        description: 'Missing nosniff attribute. Browsers can guess content types and run text files as scripts.',
+        message: 'Browsers may attempt MIME-sniffing and execute text files as active scripts.',
+        description: 'Missing nosniff flag permits MIME confusion attacks.',
         lineNumber: 1,
         snippet: 'GET / HTTP/1.1',
-        fixSuggestion: 'Configure X-Content-Type-Options to nosniff.',
+        fixSuggestion: 'Set X-Content-Type-Options to nosniff.',
         fixSnippet: "res.setHeader('X-Content-Type-Options', 'nosniff');",
-        cweId: 'CWE-79'
+        cweId: 'CWE-79',
+        owaspId: 'LLM05'
       });
     }
   } catch (e) {
-    scorePoints = 75;
+    scorePoints = Math.max(40, scorePoints - 30);
     findings.push({
+      ruleId: 'DAST-CONNECT-ERR',
       category: 'accessGaps',
       severity: 'HIGH',
-      title: 'Missing Content Security Policy (CSP)',
-      file: 'HTTP Headers',
-      message: 'No CSP headers detected. Cross-site scripting vulnerabilities could be exploited.',
-      description: 'No CSP headers detected. Cross-site scripting vulnerabilities could be exploited.',
+      title: 'Target Endpoint Reachability Warning',
+      file: 'Network',
+      message: `Failed to complete dynamic probing for ${url}. Ensure the server is online and accessible.`,
+      description: e.message,
       lineNumber: 1,
-      snippet: 'HTTP/1.1 Headers',
-      fixSuggestion: 'Configure Content Security Policy (CSP) to restrict scripts origin.',
-      fixSnippet: "app.use(helmet.contentSecurityPolicy());",
-      cweId: 'CWE-1021'
+      snippet: url,
+      fixSuggestion: 'Verify domain DNS and server uptime.',
+      fixSnippet: 'ping ' + domain,
+      cweId: 'CWE-1021',
+      owaspId: 'LLM02'
     });
   }
 
+  scorePoints = Math.max(0, scorePoints);
   let grade = 'A';
-  if (scorePoints < 40) grade = 'F';
-  else if (scorePoints < 60) grade = 'D';
+  if (scorePoints < 50) grade = 'F';
+  else if (scorePoints < 65) grade = 'D';
   else if (scorePoints < 80) grade = 'C';
   else if (scorePoints < 90) grade = 'B';
+  else if (scorePoints >= 95) grade = 'A+';
 
   return {
     repo: domain,
     grade,
-    score: Math.max(0, scorePoints),
+    score: scorePoints,
     findingsCount: findings.length,
-    findings
+    findings,
+    scanType: 'DAST_DYNAMIC_PROBE'
   };
 }
 
+// -----------------------------------------------------------------------------
+// HYBRID SCANNER ENGINE ORCHESTRATOR
+// -----------------------------------------------------------------------------
 export async function runScan(repoUrl, localFilePath = null) {
   let owner = 'local', repo = 'upload';
   let zipBuffer;
@@ -576,6 +682,7 @@ export async function runScan(repoUrl, localFilePath = null) {
   if (repoUrl) {
     const repoInfo = parseGitHubUrl(repoUrl);
     if (!repoInfo) {
+      // Run active DAST Web Scan if not a GitHub URL
       return await runWebScan(repoUrl);
     }
     owner = repoInfo.owner;
@@ -593,82 +700,94 @@ export async function runScan(repoUrl, localFilePath = null) {
   try {
     const files = getFilesFromZip(zipBuffer);
     
-    let geminiReport = null;
-    if (process.env.GEMINI_API_KEY) {
-      console.log(`[Scanner] Running Google Gemini AI audit for ${owner}/${repo}`);
-      geminiReport = await runGeminiAudit(files, `${owner}/${repo}`);
-    }
+    // 1. Run Deterministic Static Analysis Engine (Fast & Zero Hallucination)
+    console.log(`[VibeScan Engine] Running Deterministic VIBE Security Rules on ${files.length} files (${owner}/${repo})`);
     
-    if (geminiReport && Array.isArray(geminiReport.findings)) {
-      geminiReport.findings.forEach(f => {
-        findings.push({
-          category: f.category || 'insecureDefaults',
-          severity: f.severity || 'HIGH',
-          title: f.title || 'Security Exposure',
-          file: f.filePath,
-          message: f.description || 'AI detected static vulnerability.',
-          description: f.description,
-          lineNumber: f.lineNumber || null,
-          snippet: f.snippet || null,
-          fixSuggestion: f.fixSuggestion || null,
-          fixSnippet: f.fixSnippet || null,
-          cweId: f.cweId || null,
-          cveId: f.cveId || null
-        });
-      });
-    } else {
-      console.log(`[Scanner] Running Static Heuristics fallback engine for ${owner}/${repo}`);
-      for (const file of files) {
-        const lines = file.content.split('\n');
-        
-        for (const [category, rules] of Object.entries(staticRules)) {
-          for (const rule of rules) {
-            lines.forEach((line, index) => {
-              rule.regex.lastIndex = 0;
-              if (rule.regex.test(line)) {
-                let snippet = line.trim();
-                if (category === 'hardcodedSecrets') {
-                  snippet = line.replace(rule.regex, (match) => {
-                    if (match.startsWith('sk-')) return `sk-...${match.slice(-6)}`;
-                    if (match.startsWith('AKIA')) return `AKIA...${match.slice(-4)}`;
-                    return '[REDACTED SECRET]';
-                  }).trim();
-                }
-                
-                findings.push({
-                  category,
-                  severity: rule.severity,
-                  title: rule.title,
-                  file: file.filePath,
-                  message: rule.description,
-                  description: rule.description,
-                  lineNumber: index + 1,
-                  snippet,
-                  fixSuggestion: rule.fixSuggestion,
-                  fixSnippet: rule.fixSnippet,
-                  cweId: rule.cweId,
-                  cveId: null
-                });
+    for (const file of files) {
+      const lines = file.content.split('\n');
+      
+      for (const [category, rules] of Object.entries(staticRules)) {
+        for (const rule of rules) {
+          lines.forEach((line, index) => {
+            rule.regex.lastIndex = 0;
+            if (rule.regex.test(line)) {
+              let snippet = line.trim();
+              if (category === 'hardcodedSecrets') {
+                snippet = line.replace(rule.regex, (match) => {
+                  if (match.startsWith('sk-')) return `sk-...${match.slice(-6)}`;
+                  if (match.startsWith('AKIA')) return `AKIA...${match.slice(-4)}`;
+                  if (match.startsWith('FLWSECK')) return `FLWSECK...${match.slice(-4)}`;
+                  return '[REDACTED_SECRET]';
+                }).trim();
               }
-            });
-          }
+              
+              findings.push({
+                ruleId: rule.ruleId || 'VIBE-GEN',
+                category,
+                severity: rule.severity,
+                title: rule.title,
+                file: file.filePath,
+                message: rule.description,
+                description: rule.description,
+                lineNumber: index + 1,
+                snippet,
+                fixSuggestion: rule.fixSuggestion,
+                fixSnippet: rule.fixSnippet,
+                diffPatch: rule.diffPatch || null,
+                cweId: rule.cweId,
+                owaspId: rule.owaspId || 'LLM02',
+                cveId: null
+              });
+            }
+          });
         }
+      }
 
-        if (file.filePath.endsWith('package.json')) {
-          try {
-            const pkg = JSON.parse(file.content);
-            const dependencies = { ...pkg.dependencies };
-            
-            const cveFindings = await checkCVEs(dependencies);
-            findings.push(...cveFindings);
-            
-            const hallucinatedFindings = await checkHallucinatedPackages(dependencies);
-            findings.push(...hallucinatedFindings);
-          } catch (e) {}
+      // Check package.json for known CVEs and hallucinated packages
+      if (file.filePath.endsWith('package.json')) {
+        try {
+          const pkg = JSON.parse(file.content);
+          const dependencies = { ...pkg.dependencies, ...pkg.devDependencies };
+          
+          const cveFindings = await checkCVEs(dependencies);
+          findings.push(...cveFindings);
+          
+          const hallucinatedFindings = await checkHallucinatedPackages(dependencies);
+          findings.push(...hallucinatedFindings);
+        } catch (e) {
+          console.error('package.json parse error:', e.message);
         }
       }
     }
 
+    // 2. Optional Gemini AI Contextual Audit Enhancement (If API Key Present)
+    if (process.env.GEMINI_API_KEY) {
+      console.log(`[VibeScan Engine] Running Gemini AI Architectural Audit for ${owner}/${repo}`);
+      const geminiReport = await runGeminiAudit(files, `${owner}/${repo}`);
+      if (geminiReport && Array.isArray(geminiReport.findings)) {
+        geminiReport.findings.forEach(f => {
+          findings.push({
+            ruleId: f.ruleId || 'VIBE-AI-AUDIT',
+            category: f.category || 'owasp',
+            severity: f.severity || 'HIGH',
+            title: f.title || 'AI Detected Security Risk',
+            file: f.filePath,
+            message: f.description || 'AI detected static vulnerability.',
+            description: f.description,
+            lineNumber: f.lineNumber || null,
+            snippet: f.snippet || null,
+            fixSuggestion: f.fixSuggestion || null,
+            fixSnippet: f.fixSnippet || null,
+            diffPatch: f.diffPatch || null,
+            cweId: f.cweId || 'CWE-1156',
+            owaspId: f.owaspId || 'LLM01',
+            cveId: f.cveId || null
+          });
+        });
+      }
+    }
+
+    // 3. Deduplicate Findings
     const uniqueFindings = [];
     const seen = new Set();
     findings.forEach(f => {
@@ -679,19 +798,21 @@ export async function runScan(repoUrl, localFilePath = null) {
       }
     });
 
+    // 4. Calculate Risk Score & Grade
     uniqueFindings.forEach(f => {
-      if (f.severity === 'CRITICAL') scorePoints -= 40;
-      else if (f.severity === 'HIGH') scorePoints -= 30;
-      else if (f.severity === 'MEDIUM') scorePoints -= 15;
+      if (f.severity === 'CRITICAL') scorePoints -= 35;
+      else if (f.severity === 'HIGH') scorePoints -= 20;
+      else if (f.severity === 'MEDIUM') scorePoints -= 10;
       else if (f.severity === 'LOW') scorePoints -= 5;
     });
 
-    let grade = 'A';
     scorePoints = Math.max(0, scorePoints);
+    let grade = 'A';
     if (scorePoints < 40) grade = 'F';
     else if (scorePoints < 60) grade = 'D';
-    else if (scorePoints < 80) grade = 'C';
+    else if (scorePoints < 75) grade = 'C';
     else if (scorePoints < 90) grade = 'B';
+    else if (scorePoints >= 95 && uniqueFindings.length === 0) grade = 'A+';
 
     if (localFilePath && fs.existsSync(localFilePath)) {
       fs.unlinkSync(localFilePath);
@@ -702,7 +823,8 @@ export async function runScan(repoUrl, localFilePath = null) {
       grade,
       score: scorePoints,
       findingsCount: uniqueFindings.length,
-      findings: uniqueFindings
+      findings: uniqueFindings,
+      scanType: 'HYBRID_SAST_ENGINE'
     };
 
   } catch (error) {
@@ -710,6 +832,6 @@ export async function runScan(repoUrl, localFilePath = null) {
       fs.unlinkSync(localFilePath);
     }
     console.error('Fatal scan error:', error.message);
-    throw new Error('Failed to process repository.');
+    throw new Error('Failed to process repository: ' + error.message);
   }
 }
