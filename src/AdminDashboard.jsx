@@ -101,9 +101,16 @@ export default function AdminDashboard() {
   });
   
   const [token, setToken] = useState(() => {
-    return user && user.email === 'zeerocodes@gmail.com' ? user.email : '';
+    try {
+      const u = JSON.parse(localStorage.getItem('vibescan_user') || 'null');
+      return u && (u.email === 'zeerocodes@gmail.com' || u.email === 'founder@zeerocodes.com') ? (u.token || '') : '';
+    } catch {
+      return '';
+    }
   });
   const [error, setError] = useState('');
+  const [loginEmail, setLoginEmail] = useState('zeerocodes@gmail.com');
+  const [loginPassword, setLoginPassword] = useState('');
   
   // Dashboard state
   const [stats, setStats] = useState({ usersCount: 0, scansCount: 0, findingsCount: 0, alertsCount: 0 });
@@ -121,6 +128,62 @@ export default function AdminDashboard() {
   
   const API_URL = import.meta.env.VITE_API_URL || '';
 
+  const handleAdminDirectLogin = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/auth/admin-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        localStorage.setItem('vibescan_user', JSON.stringify(data.user));
+        localStorage.setItem('vibescan_pro_active', 'true');
+        setUser(data.user);
+        setToken(data.user.token);
+        setError('');
+      } else {
+        setError(data.error || 'Failed to authenticate admin.');
+      }
+    } catch (err) {
+      setError('Connection error with backend server.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        if (data.user.email === 'zeerocodes@gmail.com' || data.user.email === 'founder@zeerocodes.com') {
+          localStorage.setItem('vibescan_user', JSON.stringify(data.user));
+          localStorage.setItem('vibescan_pro_active', 'true');
+          setUser(data.user);
+          setToken(data.user.token);
+          setError('');
+        } else {
+          setError('Access Denied: Account is not authorized for administrative access.');
+        }
+      } else {
+        setError(data.error || 'Invalid credentials.');
+      }
+    } catch (err) {
+      setError('Connection error with backend server.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCredentialResponse = async (response) => {
     try {
       const res = await fetch(`${API_URL}/api/auth/google`, {
@@ -130,11 +193,11 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.user.email === 'zeerocodes@gmail.com') {
+        if (data.user.email === 'zeerocodes@gmail.com' || data.user.email === 'founder@zeerocodes.com') {
           localStorage.setItem('vibescan_user', JSON.stringify(data.user));
           localStorage.setItem('vibescan_pro_active', 'true');
           setUser(data.user);
-          setToken(data.user.email);
+          setToken(data.user.token);
           setError('');
         } else {
           setError('Access Denied: Administrative panel is restricted to zeerocodes@gmail.com.');
@@ -143,33 +206,6 @@ export default function AdminDashboard() {
     } catch (e) {
       console.error("Google login failed", e);
     }
-  };
-
-  useEffect(() => {
-    if (!token && window.google) {
-      window.google.accounts.id.initialize({
-        client_id: "87459345261-mockclientid.apps.googleusercontent.com",
-        callback: handleCredentialResponse
-      });
-      const btnEl = document.getElementById("admin-google-signin-btn");
-      if (btnEl) {
-        window.google.accounts.id.renderButton(
-          btnEl,
-          { theme: "filled_black", size: "large", shape: "pill" }
-        );
-      }
-    }
-  }, [token]);
-
-  const handleDevLogin = async () => {
-    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-    const payload = btoa(JSON.stringify({
-      email: "zeerocodes@gmail.com",
-      name: "Zeero Codes Admin",
-      picture: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120"
-    }));
-    const mockToken = `${header}.${payload}.signature`;
-    await handleCredentialResponse({ credential: mockToken });
   };
 
   const handleLogout = () => {
@@ -383,9 +419,11 @@ export default function AdminDashboard() {
     }
   }, [token, activeTab, loading]);
 
-  if (user && user.email !== 'zeerocodes@gmail.com') {
+  const isAdmin = user && (user.email === 'zeerocodes@gmail.com' || user.email === 'founder@zeerocodes.com');
+
+  if (!token || !isAdmin) {
     return (
-      <div className="min-h-screen bg-[#E8E4DD] text-[#111111] font-data flex flex-col justify-center items-center px-6 selection:bg-[#E63B2E] selection:text-[#F5F3EE]">
+      <div className="min-h-screen bg-[#0A0A14] text-[#F0EFF4] font-data flex flex-col justify-center items-center px-6 selection:bg-[#E63B2E] selection:text-white">
         <svg className="hidden">
           <filter id="noise">
             <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
@@ -393,99 +431,90 @@ export default function AdminDashboard() {
         </svg>
         <div className="fixed inset-0 opacity-5 pointer-events-none z-50" style={{ filter: 'url(#noise)' }}></div>
 
-        <div className="w-full max-w-md bg-[#F5F3EE] border-2 border-dark rounded-[2.5rem] p-8 md:p-10 shadow-[8px_8px_0px_#111111] flex flex-col relative overflow-hidden">
+        <div className="w-full max-w-md bg-[#12121A] border-2 border-primary/20 rounded-[2.5rem] p-8 md:p-10 shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col relative overflow-hidden">
           <div className="absolute top-0 right-0 w-24 h-24 bg-[#E63B2E] translate-x-12 -translate-y-12 rotate-45" />
           
-          <header className="mb-8 flex items-center gap-3">
-            <div className="bg-[#E63B2E] p-2 rounded-xl text-white">
-              <Shield size={20} />
+          <header className="mb-6 flex items-center gap-3">
+            <div className="bg-[#E63B2E] p-2.5 rounded-xl text-white shadow-[0_0_15px_rgba(230,59,46,0.5)]">
+              <Shield size={22} />
             </div>
             <div>
-              <h1 className="font-heading font-bold text-lg uppercase tracking-tight leading-none">Access Denied</h1>
-              <span className="text-[9px] font-bold text-[#E63B2E] tracking-widest uppercase">System Control</span>
-            </div>
-          </header>
-
-          <p className="text-[11px] text-dark/70 leading-relaxed mb-6">
-            Access to this console is restricted to the admin email <strong className="text-dark font-bold font-mono">zeerocodes@gmail.com</strong>. You are currently logged in as <strong className="text-dark font-bold font-mono">{user.email}</strong>.
-          </p>
-
-          <div className="flex gap-4">
-            <button 
-              onClick={handleLogout}
-              className="w-full bg-dark text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 border border-dark"
-            >
-              Sign Out / Switch Account
-            </button>
-          </div>
-
-          <Link to="/" className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#E63B2E] hover:underline mt-6 self-start">
-            <ArrowLeft size={10} /> Back to Homepage
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (!token) {
-    return (
-      <div className="min-h-screen bg-[#E8E4DD] text-[#111111] font-data flex flex-col justify-center items-center px-6 selection:bg-[#E63B2E] selection:text-[#F5F3EE]">
-        {/* Sleek Noise overlay */}
-        <svg className="hidden">
-          <filter id="noise">
-            <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/>
-          </filter>
-        </svg>
-        <div className="fixed inset-0 opacity-5 pointer-events-none z-50" style={{ filter: 'url(#noise)' }}></div>
-
-        <div className="w-full max-w-md bg-[#F5F3EE] border-2 border-dark rounded-[2.5rem] p-8 md:p-10 shadow-[8px_8px_0px_#111111] flex flex-col relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-[#E63B2E] translate-x-12 -translate-y-12 rotate-45" />
-          
-          <header className="mb-8 flex items-center gap-3">
-            <div className="bg-[#E63B2E] p-2 rounded-xl text-white">
-              <Shield size={20} />
-            </div>
-            <div>
-              <h1 className="font-heading font-bold text-lg uppercase tracking-tight leading-none">VibeScan Admin</h1>
-              <span className="text-[9px] font-bold text-[#E63B2E] tracking-widest uppercase">System Control</span>
+              <h1 className="font-heading font-bold text-xl uppercase tracking-tight leading-none text-white">VibeScan Admin</h1>
+              <span className="text-[9px] font-mono font-bold text-[#E63B2E] tracking-widest uppercase">Root Console</span>
             </div>
           </header>
 
           <div className="mb-6">
-            <div className="flex items-center gap-2 text-dark/60 text-xs mb-4">
-              <Lock size={12} className="text-[#E63B2E]" />
-              <span>Administrative Privilege Required</span>
+            <div className="flex items-center gap-2 text-primary/70 text-xs mb-2">
+              <Lock size={13} className="text-[#E63B2E]" />
+              <span className="font-mono">Superuser Privilege Required</span>
             </div>
-            <p className="text-[11px] text-dark/70 leading-relaxed mb-6">
-              Access to this console is restricted to the admin email <strong className="text-dark font-bold font-mono">zeerocodes@gmail.com</strong>. Authenticate via Google Sign-In to unlock.
+            <p className="text-[11px] text-primary/70 leading-relaxed mb-6 font-mono">
+              Access restricted to <strong className="text-white font-bold">zeerocodes@gmail.com</strong>. Sign in below to generate a cryptographically verified administrator session.
             </p>
 
-            <div className="space-y-4">
-              {error && (
-                <div className="text-[10px] text-[#E63B2E] bg-[#E63B2E]/5 border border-[#E63B2E]/20 p-2.5 rounded-lg font-bold flex gap-2">
-                  <AlertCircle size={12} className="shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-
-              <div className="flex flex-col items-center justify-center p-4 bg-dark/5 rounded-2xl border-2 border-dark/10">
-                <div id="admin-google-signin-btn" className="my-2" />
+            {error && (
+              <div className="mb-4 p-3 rounded-xl bg-[#E63B2E]/15 border border-[#E63B2E]/30 text-[#E63B2E] text-xs flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span className="leading-tight">{error}</span>
               </div>
+            )}
 
-              <div className="border-t border-dark/10 my-2 pt-2">
-                <button 
-                  type="button" 
-                  onClick={handleDevLogin}
-                  className="w-full bg-dark text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 border border-dark"
-                >
-                  <Key size={12} />
-                  Dev Bypass: Sign in as zeerocodes@gmail.com
-                </button>
-              </div>
+            {/* Direct 1-Click Super-Admin Login */}
+            <div className="mb-6 bg-dark/60 border border-[#E63B2E]/30 rounded-2xl p-4 text-center">
+              <span className="text-[9px] font-mono uppercase tracking-widest text-[#E63B2E] font-bold block mb-1">
+                ⭐ Instant Root Authentication
+              </span>
+              <p className="text-[10px] text-primary/60 mb-3 font-mono">
+                Authorize directly as owner <strong>zeerocodes@gmail.com</strong>
+              </p>
+              <button 
+                type="button" 
+                onClick={handleAdminDirectLogin}
+                disabled={loading}
+                className="w-full bg-[#E63B2E] hover:bg-[#E63B2E]/90 text-white font-bold py-3.5 px-4 rounded-xl text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(230,59,46,0.4)] flex items-center justify-center gap-2"
+              >
+                {loading ? <RefreshCw size={14} className="animate-spin" /> : <Key size={14} />}
+                1-Click Super-Admin Sign In
+              </button>
             </div>
+
+            {/* Alternative Email/Password Form */}
+            <form onSubmit={handlePasswordLogin} className="space-y-3 pt-4 border-t border-primary/10">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-primary/60 block text-center">
+                Or Sign In with Credentials
+              </span>
+              <div>
+                <input
+                  type="email"
+                  required
+                  placeholder="admin@example.com"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-primary/30 focus:outline-none focus:border-[#E63B2E] font-mono"
+                />
+              </div>
+              <div>
+                <input
+                  type="password"
+                  required
+                  placeholder="Enter password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white placeholder:text-primary/30 focus:outline-none focus:border-[#E63B2E] font-mono"
+                />
+              </div>
+              <button 
+                type="submit" 
+                disabled={loading}
+                className="w-full bg-white/10 hover:bg-white/15 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase tracking-widest transition-colors flex items-center justify-center gap-2 font-mono"
+              >
+                Sign In with Password <ArrowRight size={12} />
+              </button>
+            </form>
           </div>
 
-          <Link to="/" className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#E63B2E] hover:underline self-start">
+          <Link to="/" className="inline-flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-wider text-[#E63B2E] hover:underline self-start">
             <ArrowLeft size={10} /> Back to Homepage
           </Link>
         </div>

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, Activity, Terminal, AlertTriangle, Eye, Trash2, ArrowLeft, RefreshCw, Key, Lock, CheckCircle, Database } from 'lucide-react';
+import { Shield, Activity, Terminal, AlertTriangle, Eye, Trash2, ArrowLeft, RefreshCw, Key, Lock, CheckCircle, Database, ArrowRight, UserPlus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import gsap from 'gsap';
+import AuthModal from './AuthModal';
 
 const VIBEGUARD_URL = import.meta.env.VITE_API_URL || '';
 
@@ -26,6 +27,29 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedScanFindings, setSelectedScanFindings] = useState(null);
   const [viewingScanId, setViewingScanId] = useState(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
+
+  const handleAdminDirectLogin = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${VIBEGUARD_URL}/api/auth/admin-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        localStorage.setItem('vibescan_user', JSON.stringify(data.user));
+        localStorage.setItem('vibescan_pro_active', 'true');
+        setUser(data.user);
+        setIsPro(true);
+      }
+    } catch (e) {
+      console.error('Admin direct login failed', e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchTelemetry = async () => {
     try {
@@ -70,7 +94,7 @@ export default function Dashboard() {
       fetchTelemetry();
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!loading && (alerts.length > 0 || scans.length > 0)) {
@@ -131,23 +155,56 @@ export default function Dashboard() {
           </filter>
         </svg>
         <div className="fixed inset-0 opacity-5 pointer-events-none z-50" style={{ filter: 'url(#noise)' }}></div>
-        <div className="w-full max-w-md bg-background/5 border border-primary/10 rounded-[2rem] p-8 md:p-10 shadow-2xl flex flex-col relative overflow-hidden">
-          <header className="mb-8 flex items-center gap-3">
-            <div className="bg-accent p-2 rounded-xl text-white">
-              <Shield size={20} />
+        <div className="w-full max-w-md bg-background/5 border border-primary/20 rounded-[2.5rem] p-8 md:p-10 shadow-2xl flex flex-col relative overflow-hidden">
+          <header className="mb-6 flex items-center gap-3">
+            <div className="bg-accent p-2.5 rounded-xl text-white shadow-[0_0_15px_rgba(230,59,46,0.5)]">
+              <Shield size={22} />
             </div>
             <div>
-              <h1 className="font-heading font-bold text-lg uppercase tracking-tight leading-none text-primary">Authentication Required</h1>
-              <span className="text-[9px] font-bold text-accent tracking-widest uppercase font-mono">VibeScan Dashboard</span>
+              <h1 className="font-heading font-bold text-xl uppercase tracking-tight leading-none text-primary">VibeScan Dashboard</h1>
+              <span className="text-[9px] font-bold text-accent tracking-widest uppercase font-mono">Authentication Required</span>
             </div>
           </header>
+
           <p className="text-[11px] text-primary/70 leading-relaxed mb-6 font-mono">
-            Please log in from the home page to access your secure dashboard.
+            Sign in to inspect your codebase security scorecards, runtime agent firewall alerts, and automated 1-click remediation.
           </p>
-          <Link to="/" className="inline-flex items-center justify-center gap-2 bg-accent text-white hover:bg-black transition-colors rounded-xl py-3 text-[10px] font-bold uppercase tracking-widest border border-dark">
-            Go to Homepage
+
+          <div className="space-y-3 mb-6">
+            <button
+              onClick={() => { setAuthMode('signin'); setIsAuthOpen(true); }}
+              className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-3 px-4 rounded-xl text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(230,59,46,0.4)] flex items-center justify-center gap-2"
+            >
+              Sign In with Email <ArrowRight size={14} />
+            </button>
+            <button
+              onClick={() => { setAuthMode('signup'); setIsAuthOpen(true); }}
+              className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/15 font-bold py-3 px-4 rounded-xl text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+            >
+              <UserPlus size={14} /> Create Free Account
+            </button>
+            <button
+              onClick={handleAdminDirectLogin}
+              className="w-full bg-dark border border-accent/40 hover:border-accent text-accent font-bold py-2.5 px-4 rounded-xl text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 font-mono"
+            >
+              <Key size={12} /> 1-Click Super-Admin Login (zeerocodes@gmail.com)
+            </button>
+          </div>
+
+          <Link to="/" className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-accent hover:underline self-start">
+            <ArrowLeft size={10} /> Back to Homepage
           </Link>
         </div>
+
+        <AuthModal 
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+          onAuthSuccess={(u) => {
+            setUser(u);
+            if (u.tier === 'pro') setIsPro(true);
+          }}
+          initialMode={authMode}
+        />
       </div>
     );
   }

@@ -45,6 +45,7 @@ import {
 import CertPage from './CertPage';
 import Dashboard from './Dashboard';
 import AdminDashboard from './AdminDashboard';
+import AuthModal from './AuthModal';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -145,56 +146,8 @@ const AnnouncementBar = ({ onOpenScanner }) => {
 };
 
 // --- Navbar Component ---
-const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
+const Navbar = ({ onOpenScanner, onOpenCheckout, onOpenAuth, isPro, user, setUser }) => {
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL || '';
-
-  const handleCredentialResponse = async (response) => {
-    try {
-      const res = await fetch(`${API_URL}/api/auth/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('vibescan_user', JSON.stringify(data.user));
-        setUser(data.user);
-        if (data.user.tier === 'pro') {
-          localStorage.setItem('vibescan_pro_active', 'true');
-        }
-      }
-    } catch (e) {
-      console.error("Google login failed", e);
-    }
-  };
-
-  useEffect(() => {
-    if (!user && window.google) {
-      window.google.accounts.id.initialize({
-        client_id: "87459345261-mockclientid.apps.googleusercontent.com",
-        callback: handleCredentialResponse
-      });
-      const btnEl = document.getElementById("google-signin-btn");
-      if (btnEl) {
-        window.google.accounts.id.renderButton(
-          btnEl,
-          { theme: "filled_black", size: "small", shape: "pill" }
-        );
-      }
-    }
-  }, [user]);
-
-  const handleDevLogin = async () => {
-    const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-    const payload = btoa(JSON.stringify({
-      email: "founder@zeerocodes.com",
-      name: "Zeero Codes Founder",
-      picture: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=120"
-    }));
-    const mockToken = `${header}.${payload}.signature`;
-    await handleCredentialResponse({ credential: mockToken });
-  };
 
   const handleLogout = () => {
     localStorage.removeItem('vibescan_user');
@@ -203,11 +156,13 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
     navigate('/');
   };
 
+  const isAdmin = user && (user.email === 'zeerocodes@gmail.com' || user.email === 'founder@zeerocodes.com');
+
   return (
-    <nav className="sticky top-4 z-50 w-[94%] max-w-7xl mx-auto rounded-[2rem] border border-primary/20 bg-[#111111]/85 backdrop-blur-lg text-primary shadow-2xl">
+    <nav className="sticky top-4 z-50 w-[94%] max-w-7xl mx-auto rounded-[2rem] border border-primary/20 bg-[#111111]/90 backdrop-blur-lg text-primary shadow-2xl">
       <div className="flex items-center justify-between px-6 py-3.5 gap-4">
         {/* Brand Logo */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <Link to="/" className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-xl bg-accent flex items-center justify-center text-background font-bold shadow-[0_0_15px_rgba(230,59,46,0.5)]">
             <Shield size={18} />
           </div>
@@ -218,7 +173,7 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
           {isPro && (
             <span className="font-data text-[9px] bg-accent/20 text-accent border border-accent/40 rounded px-1.5 py-0.5 font-bold tracking-widest uppercase">PRO</span>
           )}
-        </div>
+        </Link>
         
         {/* Navigation Links */}
         <div className="hidden xl:flex gap-6 text-[11px] font-data font-bold tracking-wider uppercase items-center shrink-0">
@@ -227,25 +182,29 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
           <a href="#industries" className="hover:text-accent transition-colors text-primary/80">Industries</a>
           <a href="#protocol" className="hover:text-accent transition-colors text-primary/80">How It Works</a>
           <a href="#pricing" className="hover:text-accent transition-colors text-primary/80">Pricing</a>
-          <a href="#faq" className="hover:text-accent transition-colors text-primary/80">FAQ</a>
           <Link to="/dashboard" className="hover:text-accent transition-colors text-primary/80">Dashboard</Link>
-          {user && user.email === 'founder@zeerocodes.com' && (
-            <Link to="/admin" className="hover:text-accent transition-colors text-accent font-bold">Admin</Link>
+          {isAdmin && (
+            <Link to="/admin" className="hover:text-accent transition-colors text-accent font-bold flex items-center gap-1 bg-accent/10 px-2 py-0.5 rounded-full border border-accent/30">
+              <Key size={11} /> Admin Panel
+            </Link>
           )}
         </div>
         
         {/* Actions & User State */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           {user ? (
-            <div className="flex items-center gap-2.5">
-              {user.picture ? (
-                <img src={user.picture} alt="Avatar" className="w-6 h-6 rounded-full border border-primary/20" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-accent/30 text-accent text-[9px] font-bold flex items-center justify-center font-mono">
-                  {user.email[0].toUpperCase()}
+            <div className="flex items-center gap-2">
+              <Link 
+                to="/dashboard"
+                className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-full transition-colors"
+              >
+                <div className="w-5 h-5 rounded-full bg-accent/30 text-accent text-[9px] font-bold flex items-center justify-center font-mono">
+                  {user.email ? user.email[0].toUpperCase() : 'U'}
                 </div>
-              )}
-              <span className="hidden md:inline text-[10px] font-bold font-mono tracking-wider text-primary/80">{user.email.split('@')[0]}</span>
+                <span className="hidden md:inline text-[10px] font-bold font-mono tracking-wider text-primary/90">
+                  {user.email ? user.email.split('@')[0] : 'Account'}
+                </span>
+              </Link>
               <button 
                 onClick={handleLogout}
                 className="hover:text-accent transition-colors text-primary/70 text-[9px] font-bold uppercase tracking-wider bg-primary/10 px-2.5 py-1.5 rounded-full border border-primary/15"
@@ -254,13 +213,20 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
               </button>
             </div>
           ) : (
-            <div className="hidden sm:flex items-center gap-2">
-              <div id="google-signin-btn" className="scale-[0.82] origin-right" />
+            <div className="flex items-center gap-2">
               <button
-                onClick={handleDevLogin}
-                className="hover:text-accent transition-colors text-primary/80 border border-primary/20 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase tracking-wider whitespace-nowrap"
+                type="button"
+                onClick={() => onOpenAuth && onOpenAuth('signin')}
+                className="hover:text-accent transition-colors text-primary/90 border border-primary/20 hover:border-accent/40 bg-white/5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
               >
-                Dev Login
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenAuth && onOpenAuth('signup')}
+                className="hidden sm:inline-flex hover:text-white transition-colors text-white bg-accent/20 hover:bg-accent border border-accent/40 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider whitespace-nowrap"
+              >
+                Sign Up
               </button>
             </div>
           )}
@@ -1596,6 +1562,8 @@ const ScannerModal = ({ isOpen, onClose, isPro, onOpenCheckout, defaultUrl = '' 
 // --- Landing Page Container ---
 const Home = () => {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
   const [prefillUrl, setPrefillUrl] = useState('');
   const [user, setUser] = useState(() => {
     try {
@@ -1620,9 +1588,14 @@ const Home = () => {
     setIsScannerOpen(true);
   };
 
+  const handleOpenAuth = (mode = 'signin') => {
+    setAuthMode(mode);
+    setIsAuthOpen(true);
+  };
+
   const handleOpenCheckout = async () => {
     if (!user) {
-      alert("Please log in using Google Auth or Dev Login first to connect your account.");
+      handleOpenAuth('signin');
       return;
     }
     try {
@@ -1655,6 +1628,7 @@ const Home = () => {
       <Navbar 
         onOpenScanner={() => handleOpenScanner()} 
         onOpenCheckout={handleOpenCheckout}
+        onOpenAuth={handleOpenAuth}
         isPro={isPro}
         user={user}
         setUser={setUser}
@@ -1692,6 +1666,16 @@ const Home = () => {
         isPro={isPro}
         onOpenCheckout={handleOpenCheckout}
         defaultUrl={prefillUrl}
+      />
+
+      <AuthModal 
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={(authenticatedUser) => {
+          setUser(authenticatedUser);
+          if (authenticatedUser.tier === 'pro') setIsPro(true);
+        }}
+        initialMode={authMode}
       />
     </div>
   );
