@@ -15,7 +15,8 @@ import {
   CheckCircle, 
   Database, 
   Terminal,
-  Server
+  Server,
+  ArrowRight
 } from 'lucide-react';
 import gsap from 'gsap';
 

@@ -40,7 +40,8 @@ import {
   Building,
   HeartPulse,
   ShoppingBag,
-  Bot
+  Bot,
+  Key
 } from 'lucide-react';
 import CertPage from './CertPage';
 import Dashboard from './Dashboard';
