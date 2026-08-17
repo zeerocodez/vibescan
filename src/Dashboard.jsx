@@ -3,7 +3,7 @@ import { Shield, Activity, Terminal, AlertTriangle, Eye, Trash2, ArrowLeft, Refr
 import { Link } from 'react-router-dom';
 import gsap from 'gsap';
 
-const VIBEGUARD_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const VIBEGUARD_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Dashboard() {
   const [user, setUser] = useState(() => {

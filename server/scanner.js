@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AdmZip from 'adm-zip';
 import fs from 'fs';
+import path from 'path';
 
 function parseGitHubUrl(url) {
   try {
@@ -17,7 +18,7 @@ function parseGitHubUrl(url) {
 
 async function downloadRepoZip(owner, repo) {
   const token = process.env.GITHUB_TOKEN;
-  const headers = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeScan-Engine/2.0' };
+  const headers = { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'VibeScan-Engine/3.0' };
   if (token) {
     headers['Authorization'] = `token ${token}`;
   }
@@ -30,7 +31,7 @@ async function downloadRepoZip(owner, repo) {
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         headers,
-        timeout: 20000
+        timeout: 25000
       });
       return response.data;
     } catch (error) {
@@ -103,8 +104,8 @@ async function checkHallucinatedPackages(dependencies) {
   const pkgs = Object.keys(dependencies);
   
   for (const pkg of pkgs) {
-    // Skip local workspace packages or common built-in protocols
-    if (pkg.startsWith('@types/') || pkg.startsWith('file:') || pkg.startsWith('workspace:')) continue;
+    // Skip local workspace packages, scoped types, or built-in protocols
+    if (pkg.startsWith('@types/') || pkg.startsWith('file:') || pkg.startsWith('workspace:') || pkg.startsWith('portal:')) continue;
     try {
       await axios.head(`https://registry.npmjs.org/${encodeURIComponent(pkg)}`, { timeout: 3500 });
     } catch (e) {
@@ -139,20 +140,27 @@ function getFilesFromZip(zipBuffer) {
   
   let totalSize = 0;
   let fileCount = 0;
-  const MAX_SIZE = 25 * 1024 * 1024; // 25MB limit (elevated for full-stack apps)
-  const MAX_FILES = 200;              // 200 files limit
+  const MAX_SIZE = 35 * 1024 * 1024; // 35MB limit
+  const MAX_FILES = 300;              // 300 code files limit
 
   const IGNORED_PATTERNS = [
     'node_modules/', '.git/', 'dist/', 'build/', '.next/', '.nuxt/',
     'coverage/', '.turbo/', '.cache/', '.vscode/', '.idea/',
     'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb',
     '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg', '.webp', '.mp4',
-    '.woff', '.woff2', '.ttf', '.eot', '.zip', '.tar', '.gz', '.pdf'
+    '.woff', '.woff2', '.ttf', '.eot', '.zip', '.tar', '.gz', '.pdf',
+    '.mp3', '.wav', '.mov', '.avi'
   ];
 
   for (const entry of entries) {
     if (entry.isDirectory) continue;
     
+    // Zip-Slip Path Traversal Protection
+    const cleanEntryName = path.normalize(entry.entryName).replace(/^(\.\.[\/\\])+/, '');
+    if (cleanEntryName.includes('..') || cleanEntryName.startsWith('/') || cleanEntryName.startsWith('\\')) {
+      continue;
+    }
+
     const entryNameLower = entry.entryName.toLowerCase();
     const isIgnored = IGNORED_PATTERNS.some(pat => entryNameLower.includes(pat));
     if (isIgnored) continue;
@@ -163,10 +171,10 @@ function getFilesFromZip(zipBuffer) {
       fileCount++;
 
       if (totalSize > MAX_SIZE) {
-        throw new Error('Repository exceeds safety scan limits (Max size: 25MB).');
+        throw new Error('Repository exceeds safety scan limits (Max size: 35MB).');
       }
       if (fileCount > MAX_FILES) {
-        break; // Scan first 200 essential code files safely
+        break; // Scan first 300 essential code files safely
       }
 
       const content = data.toString('utf8');
@@ -188,9 +196,10 @@ function getFilesFromZip(zipBuffer) {
 function applyLocalDlp(content) {
   if (typeof content !== 'string') return content;
   let redacted = content;
-  // Redact OpenAI / Anthropic keys
+  // Redact OpenAI / Anthropic / Gemini keys
   redacted = redacted.replace(/sk-[a-zA-Z0-9]{32,}/g, (m) => `sk-...[REDACTED_DLP_${m.slice(-4)}]`);
   redacted = redacted.replace(/sk-ant-[a-zA-Z0-9]{32,}/g, (m) => `sk-ant-...[REDACTED_DLP_${m.slice(-4)}]`);
+  redacted = redacted.replace(/AIzaSy[a-zA-Z0-9_-]{33}/g, (m) => `AIzaSy...[REDACTED_DLP_${m.slice(-4)}]`);
   // Redact Paystack / Flutterwave keys
   redacted = redacted.replace(/sk_(live|test)_[0-9a-zA-Z]{20,}/g, (m) => `sk_...[REDACTED_DLP_${m.slice(-4)}]`);
   redacted = redacted.replace(/FLWSECK(_TEST)?-[0-9a-zA-Z]{20,}/g, '[REDACTED_FLUTTERWAVE_SECRET]');
@@ -212,10 +221,11 @@ async function runGeminiAudit(files, repoName) {
   if (!apiKey) return null;
 
   const fileSummary = files
+    .slice(0, 40)
     .map(
       (f) => `
 === File: ${f.filePath} ===
-${applyLocalDlp(f.content).substring(0, 7000)}
+${applyLocalDlp(f.content).substring(0, 6000)}
 `
     )
     .join('\n');
@@ -230,10 +240,10 @@ Identify items across these categories:
 3. "databaseSecurity": Unauthenticated Supabase/Firebase queries, missing RLS, or exposed database credentials.
 4. "promptSecurity": Unsanitized user inputs interpolated into system prompts (Prompt Injection / OWASP LLM01).
 5. "owasp": Direct eval(), command execution, raw SQL query concatenation, unescaped innerHTML on LLM outputs.
-6. "accessGaps": Wildcard CORS, unauthenticated Next.js Server Actions, insecure routing.
+6. "accessGaps": Wildcard CORS with credentials, unauthenticated Next.js Server Actions, insecure routing.
 
 For each finding, return:
-- "ruleId": "VIBE-001" through "VIBE-010" or "OWASP-xxx"
+- "ruleId": "VIBE-001" through "VIBE-015" or "OWASP-xxx"
 - "category": 'hardcodedSecrets' | 'webhookSecurity' | 'databaseSecurity' | 'promptSecurity' | 'owasp' | 'accessGaps' | 'dependencies'
 - "severity": 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
 - "title": Short descriptive title
@@ -300,20 +310,20 @@ ${fileSummary}
 }
 
 // -----------------------------------------------------------------------------
-// DETERMINISTIC 10 CORE VIBE-CODE SECURITY RULES (SAST ENGINE)
+// DETERMINISTIC 25+ CORE VIBE-CODE SECURITY RULES (SAST ENGINE)
 // -----------------------------------------------------------------------------
 const staticRules = {
   hardcodedSecrets: [
     {
       ruleId: 'VIBE-001',
-      regex: /sk-[a-zA-Z0-9]{32,}|sk-ant-[a-zA-Z0-9]{32,}|AIzaSy[a-zA-Z0-9_-]{33}/g,
-      title: 'Exposed AI API Key (OpenAI / Anthropic / Gemini)',
+      regex: /sk-[a-zA-Z0-9]{32,}|sk-ant-[a-zA-Z0-9]{32,}|AIzaSy[a-zA-Z0-9_-]{33}|gsk_[a-zA-Z0-9]{32,}|nvapi-[a-zA-Z0-9_-]{32,}|r8_[a-zA-Z0-9]{32,}|deepseek-[a-zA-Z0-9]{32,}/g,
+      title: 'Exposed AI API Key (OpenAI / Anthropic / Gemini / Groq / DeepSeek / Replicate)',
       severity: 'CRITICAL',
       owaspId: 'LLM02',
       description: 'A hardcoded AI model secret key was detected in your codebase. If committed or exposed in client bundles, attackers can drain API credit balances and access model fine-tunes.',
       fixSuggestion: 'Move key to server-side .env configuration (e.g. `process.env.OPENAI_API_KEY`). Never expose in `VITE_` or `NEXT_PUBLIC_` variables.',
       fixSnippet: 'const apiKey = process.env.OPENAI_API_KEY;',
-      diffPatch: '- const apiKey = "[EXPOSED_OPENAI_KEY]";\n+ const apiKey = process.env.OPENAI_API_KEY;',
+      diffPatch: '- const apiKey = "[EXPOSED_AI_KEY]";\n+ const apiKey = process.env.OPENAI_API_KEY;',
       cweId: 'CWE-798'
     },
     {
@@ -365,6 +375,42 @@ const staticRules = {
       cweId: 'CWE-798'
     },
     {
+      ruleId: 'VIBE-AWS-KEY',
+      regex: /AKIA[0-9A-Z]{16}/g,
+      title: 'Exposed AWS Access Key ID',
+      severity: 'CRITICAL',
+      owaspId: 'LLM02',
+      description: 'An AWS Access Key ID was detected in source code. Unauthorized cloud infrastructure access and crypto mining abuse can occur.',
+      fixSuggestion: 'Store AWS credentials using IAM Roles or server-side environment variables.',
+      fixSnippet: 'const accessKeyId = process.env.AWS_ACCESS_KEY_ID;',
+      diffPatch: '- const accessKeyId = "AKIA...";\n+ const accessKeyId = process.env.AWS_ACCESS_KEY_ID;',
+      cweId: 'CWE-798'
+    },
+    {
+      ruleId: 'VIBE-GH-TOKEN',
+      regex: /ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}/g,
+      title: 'Exposed GitHub Personal Access Token',
+      severity: 'CRITICAL',
+      owaspId: 'LLM02',
+      description: 'An exposed GitHub token gives immediate write/read access to private repositories, CI/CD secrets, and package registries.',
+      fixSuggestion: 'Revoke this token immediately and inject GitHub tokens via environment variables or GitHub Actions secrets.',
+      fixSnippet: 'const token = process.env.GITHUB_TOKEN;',
+      diffPatch: '- const token = "ghp_...";\n+ const token = process.env.GITHUB_TOKEN;',
+      cweId: 'CWE-798'
+    },
+    {
+      ruleId: 'VIBE-RESEND-KEY',
+      regex: /re_[a-zA-Z0-9]{24,36}/g,
+      title: 'Exposed Resend / Transactional Email API Key',
+      severity: 'HIGH',
+      owaspId: 'LLM02',
+      description: 'An exposed Resend API key allows attackers to send phishing emails from your verified domain or exhaust your quota.',
+      fixSuggestion: 'Move Resend API key to server-side environment variables.',
+      fixSnippet: 'const resend = new Resend(process.env.RESEND_API_KEY);',
+      diffPatch: '- const resend = new Resend("re_...");\n+ const resend = new Resend(process.env.RESEND_API_KEY);',
+      cweId: 'CWE-798'
+    },
+    {
       ruleId: 'VIBE-SEC-KEY',
       regex: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/g,
       title: 'Hardcoded Cryptographic Private Key',
@@ -386,8 +432,8 @@ const staticRules = {
       owaspId: 'LLM05',
       description: 'Webhook verification using standard equality (===) is vulnerable to timing side-channel attacks. A webhook signature must be verified using crypto.timingSafeEqual.',
       fixSuggestion: 'Use crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computedHash)) to protect webhook authentication.',
-      fixSnippet: 'const isValid = crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(computedHash, "utf8"));',
-      diffPatch: '- if (signature === computedHash) {\n+ if (crypto.timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(computedHash, "utf8"))) {',
+      fixSnippet: 'const isValid = sigBuffer.length === hashBuffer.length && crypto.timingSafeEqual(sigBuffer, hashBuffer);',
+      diffPatch: '- if (signature === computedHash) {\n+ if (sigBuffer.length === hashBuffer.length && crypto.timingSafeEqual(sigBuffer, hashBuffer)) {',
       cweId: 'CWE-208'
     }
   ],
@@ -517,6 +563,7 @@ async function runWebScan(url) {
     { path: '/.env', title: 'Publicly Accessible .env File', severity: 'CRITICAL', cweId: 'CWE-552' },
     { path: '/.git/config', title: 'Publicly Accessible Git Configuration (/.git/config)', severity: 'CRITICAL', cweId: 'CWE-552' },
     { path: '/.env.local', title: 'Publicly Accessible Local Environment File', severity: 'CRITICAL', cweId: 'CWE-552' },
+    { path: '/.env.production', title: 'Publicly Accessible Production Environment File', severity: 'CRITICAL', cweId: 'CWE-552' },
     { path: '/api/debug', title: 'Public Debug Endpoint Exposed (/api/debug)', severity: 'HIGH', cweId: 'CWE-489' }
   ];
 
@@ -524,7 +571,7 @@ async function runWebScan(url) {
     try {
       const probeRes = await axios.get(`${origin}${item.path}`, { 
         timeout: 4000, 
-        headers: { 'User-Agent': 'VibeScan-DAST/2.0' },
+        headers: { 'User-Agent': 'VibeScan-DAST/3.0' },
         validateStatus: () => true 
       });
 
@@ -542,6 +589,7 @@ async function runWebScan(url) {
           snippet: `GET ${item.path} -> HTTP 200 OK`,
           fixSuggestion: 'Configure your web server / CDN (Vercel, Nginx, Cloudflare) to block access to dotfiles and sensitive paths.',
           fixSnippet: 'location ~ /\\.(?!well-known) { deny all; }',
+          diffPatch: null,
           cweId: item.cweId,
           owaspId: 'LLM02'
         });
@@ -555,7 +603,7 @@ async function runWebScan(url) {
   try {
     const response = await axios.get(url, { 
       timeout: 8000, 
-      headers: { 'User-Agent': 'VibeScan-DAST/2.0' },
+      headers: { 'User-Agent': 'VibeScan-DAST/3.0' },
       validateStatus: () => true
     });
     const headers = response.headers;
@@ -574,6 +622,7 @@ async function runWebScan(url) {
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Enable HSTS with max-age and includeSubDomains in your server configuration.',
         fixSnippet: "res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');",
+        diffPatch: "+ Strict-Transport-Security: max-age=63072000; includeSubDomains; preload",
         cweId: 'CWE-523',
         owaspId: 'LLM02'
       });
@@ -593,6 +642,7 @@ async function runWebScan(url) {
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Implement a strict Content Security Policy (CSP) header.',
         fixSnippet: "res.setHeader('Content-Security-Policy', \"default-src 'self'; script-src 'self';\");",
+        diffPatch: "+ Content-Security-Policy: default-src 'self';",
         cweId: 'CWE-1021',
         owaspId: 'LLM05'
       });
@@ -612,6 +662,7 @@ async function runWebScan(url) {
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Set X-Frame-Options to DENY or SAMEORIGIN.',
         fixSnippet: "res.setHeader('X-Frame-Options', 'DENY');",
+        diffPatch: "+ X-Frame-Options: DENY",
         cweId: 'CWE-1021',
         owaspId: 'LLM05'
       });
@@ -631,8 +682,29 @@ async function runWebScan(url) {
         snippet: 'GET / HTTP/1.1',
         fixSuggestion: 'Set X-Content-Type-Options to nosniff.',
         fixSnippet: "res.setHeader('X-Content-Type-Options', 'nosniff');",
+        diffPatch: "+ X-Content-Type-Options: nosniff",
         cweId: 'CWE-79',
         owaspId: 'LLM05'
+      });
+    }
+
+    if (!headers['referrer-policy']) {
+      scorePoints -= 5;
+      findings.push({
+        ruleId: 'DAST-REFERRER',
+        category: 'accessGaps',
+        severity: 'LOW',
+        title: 'Missing Referrer-Policy Header',
+        file: 'HTTP Headers',
+        message: 'Your application does not declare a Referrer-Policy header, potentially leaking URL paths and query parameters to third parties.',
+        description: 'Referrer information can leak sensitive tokens in URLs.',
+        lineNumber: 1,
+        snippet: 'GET / HTTP/1.1',
+        fixSuggestion: "Set Referrer-Policy to 'strict-origin-when-cross-origin'.",
+        fixSnippet: "res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');",
+        diffPatch: "+ Referrer-Policy: strict-origin-when-cross-origin",
+        cweId: 'CWE-116',
+        owaspId: 'LLM02'
       });
     }
   } catch (e) {
@@ -717,6 +789,7 @@ export async function runScan(repoUrl, localFilePath = null) {
                   if (match.startsWith('sk-')) return `sk-...${match.slice(-6)}`;
                   if (match.startsWith('AKIA')) return `AKIA...${match.slice(-4)}`;
                   if (match.startsWith('FLWSECK')) return `FLWSECK...${match.slice(-4)}`;
+                  if (match.startsWith('ghp_')) return `ghp_...${match.slice(-4)}`;
                   return '[REDACTED_SECRET]';
                 }).trim();
               }

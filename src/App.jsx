@@ -147,7 +147,7 @@ const AnnouncementBar = ({ onOpenScanner }) => {
 // --- Navbar Component ---
 const Navbar = ({ onOpenScanner, onOpenCheckout, isPro, user, setUser }) => {
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const API_URL = import.meta.env.VITE_API_URL || '';
 
   const handleCredentialResponse = async (response) => {
     try {
