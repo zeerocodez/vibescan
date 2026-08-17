@@ -103,7 +103,7 @@ export default function AdminDashboard() {
   const [token, setToken] = useState(() => {
     try {
       const u = JSON.parse(localStorage.getItem('vibescan_user') || 'null');
-      return u && (u.email === 'zeerocodes@gmail.com' || u.email === 'founder@zeerocodes.com') ? (u.token || '') : '';
+      return u && u.email === 'zeerocodes@gmail.com' ? (u.token || '') : '';
     } catch {
       return '';
     }
@@ -185,7 +185,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.user) {
-        if (data.user.email === 'zeerocodes@gmail.com' || data.user.email === 'founder@zeerocodes.com') {
+        if (data.user.email === 'zeerocodes@gmail.com') {
           localStorage.setItem('vibescan_user', JSON.stringify(data.user));
           localStorage.setItem('vibescan_pro_active', 'true');
           setUser(data.user);
@@ -195,7 +195,7 @@ export default function AdminDashboard() {
           setError('Access Denied: Account is not authorized for administrative access.');
         }
       } else {
-        if (normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com') {
+        if (normalizedEmail === 'zeerocodes@gmail.com') {
           const adminUser = {
             id: 'usr_admin_zeerocodes',
             email: 'zeerocodes@gmail.com',
@@ -214,7 +214,7 @@ export default function AdminDashboard() {
         }
       }
     } catch (err) {
-      if (normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com') {
+      if (normalizedEmail === 'zeerocodes@gmail.com') {
         const adminUser = {
           id: 'usr_admin_zeerocodes',
           email: 'zeerocodes@gmail.com',
@@ -245,14 +245,14 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.user.email === 'zeerocodes@gmail.com' || data.user.email === 'founder@zeerocodes.com') {
+        if (data.user.email === 'zeerocodes@gmail.com') {
           localStorage.setItem('vibescan_user', JSON.stringify(data.user));
           localStorage.setItem('vibescan_pro_active', 'true');
           setUser(data.user);
           setToken(data.user.token);
           setError('');
         } else {
-          setError('Access Denied: Administrative panel is restricted to zeerocodes@gmail.com.');
+          setError('Access Denied: Administrative panel is restricted strictly to zeerocodes@gmail.com.');
         }
       }
     } catch (e) {
@@ -495,7 +495,7 @@ export default function AdminDashboard() {
     }
   }, [token, activeTab, loading]);
 
-  const isAdmin = user && (user.email === 'zeerocodes@gmail.com' || user.email === 'founder@zeerocodes.com');
+  const isAdmin = user && user.email === 'zeerocodes@gmail.com';
 
   if (!token || !isAdmin) {
     return (

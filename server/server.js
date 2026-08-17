@@ -531,7 +531,8 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
     
     userCredentialsStore.set(normalizedEmail, { password: hashedPassword, name: displayName });
 
-    const isAdmin = normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com';
+    // ONLY zeerocodes@gmail.com is granted admin privileges
+    const isAdmin = normalizedEmail === 'zeerocodes@gmail.com';
     const tierToSet = isAdmin ? 'pro' : 'free';
 
     let user;
@@ -546,12 +547,12 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
       user = { id: 'usr_' + crypto.randomBytes(8).toString('hex'), email: normalizedEmail, tier: tierToSet };
     }
 
-    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name: displayName });
+    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name: displayName, ...(isAdmin ? { role: 'admin' } : {}) });
     
     const isProduction = process.env.NODE_ENV === 'production';
     res.setHeader('Set-Cookie', `session_token=${sessionToken}; HttpOnly; ${isProduction ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=86400`);
 
-    logger.info({ action: 'user_signup_success', email: normalizedEmail, tier: user.tier });
+    logger.info({ action: 'user_registered', email: normalizedEmail, tier: user.tier });
     res.json({
       user: {
         id: user.id,
@@ -564,7 +565,7 @@ app.post('/api/auth/signup', authLimiter, async (req, res) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: error.issues[0]?.message || 'Invalid signup details.' });
+      return res.status(400).json({ error: error.issues[0]?.message || 'Invalid signup data.' });
     }
     logger.error({ action: 'signup_failed', error: error.message });
     res.status(500).json({ error: 'Failed to create account.' });
@@ -575,9 +576,10 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
     const normalizedEmail = email.toLowerCase().trim();
-    const isAdmin = normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com';
     
-    // Check credentials if registered, or grant admin access
+    // ONLY zeerocodes@gmail.com is admin
+    const isAdmin = normalizedEmail === 'zeerocodes@gmail.com';
+    
     const stored = userCredentialsStore.get(normalizedEmail);
     if (stored && stored.password !== hashPassword(password) && !isAdmin) {
       return res.status(401).json({ error: 'Invalid password. Please check your credentials.' });
@@ -602,7 +604,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     }
 
     const displayName = stored?.name || normalizedEmail.split('@')[0];
-    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name: displayName });
+    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name: displayName, ...(isAdmin ? { role: 'admin' } : {}) });
     
     const isProduction = process.env.NODE_ENV === 'production';
     res.setHeader('Set-Cookie', `session_token=${sessionToken}; HttpOnly; ${isProduction ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=86400`);
@@ -627,7 +629,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   }
 });
 
-// Dedicated 1-Click Super-Admin Instant Authentication
+// Dedicated 1-Click Super-Admin Instant Authentication (Strictly zeerocodes@gmail.com)
 app.post('/api/auth/admin-access', authLimiter, async (req, res) => {
   try {
     const adminEmail = 'zeerocodes@gmail.com';
@@ -657,7 +659,7 @@ app.post('/api/auth/admin-access', authLimiter, async (req, res) => {
     res.json({
       user: {
         id: user.id,
-        email: user.email,
+        email: adminEmail,
         tier: 'pro',
         name: 'Zeero Codes Admin',
         picture: '',
@@ -674,7 +676,7 @@ app.post('/api/auth/admin-access', authLimiter, async (req, res) => {
 app.post('/api/auth/demo-login', authLimiter, async (req, res) => {
   try {
     const demoEmail = 'founder@zeerocodes.com';
-    const sessionToken = signToken({ id: 'usr_demo', email: demoEmail, tier: 'pro', name: 'Zeero Founder', role: 'admin' });
+    const sessionToken = signToken({ id: 'usr_demo', email: demoEmail, tier: 'pro', name: 'Zeero Founder' });
     
     const isProduction = process.env.NODE_ENV === 'production';
     res.setHeader('Set-Cookie', `session_token=${sessionToken}; HttpOnly; ${isProduction ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=86400`);
@@ -717,13 +719,12 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
     }
     
     if (!email) {
-      // Fallback for mock/dev test tokens
-      email = 'zeerocodes@gmail.com';
-      name = 'Zeero Codes';
+      email = 'user@example.com';
+      name = 'User';
     }
     
     let user;
-    const isAdmin = email === 'zeerocodes@gmail.com' || email === 'founder@zeerocodes.com';
+    const isAdmin = email === 'zeerocodes@gmail.com';
     const tierToSet = isAdmin ? 'pro' : 'free';
     
     try {
@@ -747,7 +748,7 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
       };
     }
     
-    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name });
+    const sessionToken = signToken({ id: user.id, email: user.email, tier: user.tier, name, ...(isAdmin ? { role: 'admin' } : {}) });
     
     const isProduction = process.env.NODE_ENV === 'production';
     res.setHeader('Set-Cookie', `session_token=${sessionToken}; HttpOnly; ${isProduction ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=86400`);
@@ -772,7 +773,7 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// Admin Authorization Middleware (Cryptographically Hardened)
+// Admin Authorization Middleware (Cryptographically Hardened: ONLY zeerocodes@gmail.com)
 // -----------------------------------------------------------------------------
 const checkAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -794,14 +795,14 @@ const checkAdmin = (req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized administrative access. Token missing.' });
   }
 
-  // Cryptographic JWT check
+  // Cryptographic JWT check: Strictly and exclusively restricted to zeerocodes@gmail.com
   const decoded = verifyToken(token);
-  if (decoded && (decoded.email === 'zeerocodes@gmail.com' || decoded.email === 'founder@zeerocodes.com' || decoded.role === 'admin')) {
+  if (decoded && decoded.email === 'zeerocodes@gmail.com') {
     req.adminUser = decoded;
     return next();
   }
 
-  return res.status(403).json({ error: 'Access forbidden: Super-administrator privileges required.' });
+  return res.status(403).json({ error: 'Access forbidden: Super-administrator privileges are strictly restricted to zeerocodes@gmail.com.' });
 };
 
 // -----------------------------------------------------------------------------

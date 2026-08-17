@@ -156,7 +156,7 @@ const Navbar = ({ onOpenScanner, onOpenCheckout, onOpenAuth, isPro, user, setUse
     navigate('/');
   };
 
-  const isAdmin = user && (user.email === 'zeerocodes@gmail.com' || user.email === 'founder@zeerocodes.com');
+  const isAdmin = user && user.email === 'zeerocodes@gmail.com';
 
   return (
     <nav className="sticky top-4 z-50 w-[94%] max-w-7xl mx-auto rounded-[2rem] border border-primary/20 bg-[#111111]/90 backdrop-blur-lg text-primary shadow-2xl">

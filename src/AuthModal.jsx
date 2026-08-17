@@ -68,7 +68,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
         onClose();
       } else {
         // If it's the admin email, fallback gracefully
-        if (normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com') {
+        if (normalizedEmail === 'zeerocodes@gmail.com') {
           createAdminUserFallback();
         } else {
           setError(data.error || 'Authentication failed. Please check your credentials.');
@@ -76,7 +76,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
       }
     } catch (err) {
       // Resilient fallback for admin
-      if (normalizedEmail === 'zeerocodes@gmail.com' || normalizedEmail === 'founder@zeerocodes.com' || mode === 'admin') {
+      if (normalizedEmail === 'zeerocodes@gmail.com' || mode === 'admin') {
         createAdminUserFallback();
       } else {
         // Fallback for regular user account creation in offline/preview mode
